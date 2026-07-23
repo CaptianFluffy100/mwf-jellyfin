@@ -1,13 +1,13 @@
 {
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
-  "description": "Media Word Filter companion for Jellyfin. Dashboard config and mute/profile proxy APIs. Does not patch jellyfin-web.",
-  "overview": "Admin config + /MediaWordFilter proxy. Does not register File Transformation on index.html (that was blanking the web UI).",
+  "description": "Media Word Filter companion for Jellyfin. Dashboard config, mute/profile proxy, and safe jellyfin-web client inject via File Transformation.",
+  "overview": "Details-page profile/filter UI, mute loop, and /MediaWordFilter proxy. Requires File Transformation for web UI inject.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.7.0",
-  "changelog": "Stop registering File Transformation for index.html. Prior build could return empty HTML and blank details/player pages.",
+  "version": "1.0.8.0",
+  "changelog": "Restore safe File Transformation inject for details-page UI. Transform callback never returns empty HTML.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T22:10:00Z"
+  "timestamp": "2026-07-23T22:15:00Z"
 }
