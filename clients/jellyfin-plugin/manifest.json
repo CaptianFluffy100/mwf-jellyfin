@@ -3,10 +3,18 @@
     "category": "General",
     "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
     "name": "Media Word Filter",
-    "description": "Media Word Filter companion: Dashboard config, mute/profile proxy, and safe jellyfin-web client inject via File Transformation.",
-    "overview": "Details-page profile/filter UI, mute loop, and /MediaWordFilter proxy. Requires File Transformation for web UI inject.",
+    "description": "Media Word Filter companion: Dashboard config, mute/profile proxy, and reliable jellyfin-web client inject via middleware + File Transformation.",
+    "overview": "Details-page profile/filter UI, mute loop, and /MediaWordFilter proxy. Injects client script at request time with File Transformation as backup.",
     "owner": "Media-Word-Filter",
     "versions": [
+      {
+        "version": "1.0.11.0",
+        "changelog": "Fix FT payload extraction/HTML detection, add IStartupFilter middleware inject, improve mute auth token handling and HLS HtmlVideoPlayer support.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-11/jellyfin-plugin-mediawordfilter_1.0.11.0.zip",
+        "checksum": "357a84fe31217c0e3962eba2f336c649",
+        "timestamp": "2026-07-23T23:30:00Z"
+      },
       {
         "version": "1.0.10.0",
         "changelog": "Fix mute fetch auth/retry, protect loaded mutes from playbackstop, sticky id priority, and console diagnostics.",

@@ -5,6 +5,7 @@ using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.MediaWordFilter.Controllers;
 
@@ -16,14 +17,17 @@ namespace Jellyfin.Plugin.MediaWordFilter.Controllers;
 public class MwfController : ControllerBase
 {
     private readonly MwfProxyService _proxy;
+    private readonly ILogger<MwfController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MwfController"/> class.
     /// </summary>
     /// <param name="proxy">MWF proxy.</param>
-    public MwfController(MwfProxyService proxy)
+    /// <param name="logger">Logger.</param>
+    public MwfController(MwfProxyService proxy, ILogger<MwfController> logger)
     {
         _proxy = proxy;
+        _logger = logger;
     }
 
     /// <summary>
@@ -110,6 +114,18 @@ public class MwfController : ControllerBase
         if (string.IsNullOrWhiteSpace(itemId))
         {
             return BadRequest(new { error = "itemId required" });
+        }
+
+        if (!(User.Identity?.IsAuthenticated ?? false))
+        {
+            var hasTokenHeader = Request.Headers.ContainsKey("X-Emby-Token")
+                || Request.Headers.ContainsKey("Authorization");
+            _logger.LogWarning(
+                "Media Word Filter mute proxy: unauthenticated request for item {ItemId} (tokenHeaderPresent={HasTokenHeader}, remote={Remote})",
+                itemId.Trim(),
+                hasTokenHeader,
+                HttpContext.Connection.RemoteIpAddress);
+            return Unauthorized(new { error = "Authentication required for mute data" });
         }
 
         var path = "/mutes/" + Uri.EscapeDataString(itemId.Trim());

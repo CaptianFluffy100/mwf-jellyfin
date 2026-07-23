@@ -56,7 +56,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.10.0";
+  var CLIENT_VERSION = "1.0.11.0";
 
   var state = {
     enabled: readEnabled(),
@@ -228,12 +228,23 @@
     var headers = { Accept: "application/json" };
     var tok = null;
     try {
-      if (c && typeof c.getAccessToken === "function") {
+      if (c && typeof c.accessToken === "function") {
+        tok = c.accessToken();
+      }
+    } catch (_) {}
+    try {
+      if (!tok && c && typeof c.getAccessToken === "function") {
         tok = c.getAccessToken();
       }
     } catch (_) {}
+    if (!tok && c && (c.accessToken || c._accessToken)) {
+      tok = c.accessToken || c._accessToken;
+    }
     if (!tok) tok = accessTokenFromCredentials();
-    if (tok) headers["X-Emby-Token"] = tok;
+    if (tok) {
+      headers["X-Emby-Token"] = tok;
+      headers["Authorization"] = "MediaBrowser Token=" + tok + ", Client=\"Jellyfin Web\", Device=\"Browser\", DeviceId=\"mwf-plugin\", Version=\"" + CLIENT_VERSION + "\"";
+    }
     return headers;
   }
 
@@ -250,12 +261,20 @@
     return String(base).replace(/\/+$/, "") + "/" + path.replace(/^\//, "");
   }
 
-  function fetchJson(path) {
+  function fetchJson(path, allowRetry) {
     return fetch(apiUrl(path), {
       credentials: "same-origin",
       headers: authHeaders()
     }).then(function (res) {
       if (res.status === 404) return null;
+      if (res.status === 401) {
+        if (allowRetry !== false && !hasAuthToken()) {
+          warnOnce("auth-401:" + path, "request returned 401 before Jellyfin auth was ready: " + path);
+        } else {
+          warnOnce("auth-401:" + path, "request returned 401 (check Jellyfin login): " + path);
+        }
+        throw new Error("HTTP 401 unauthorized");
+      }
       if (!res.ok) {
         return res.text().then(function (t) {
           throw new Error("HTTP " + res.status + " " + t);
@@ -333,12 +352,19 @@
    * Resolve Jellyfin item Id (never MediaSourceId). Sticky while a video element exists.
    */
   function resolvePlaybackItemId(video) {
-    if (video && state.itemId && state.muteKey === cacheKey(state.itemId)) {
+    var playing = video && !video.paused && !video.ended;
+
+    if (video && state.itemId && (playing || state.muteKey === cacheKey(state.itemId))) {
       return { id: state.itemId, source: state.itemIdSource || "sticky-loaded" };
     }
 
     if (video && state.itemId) {
       return { id: state.itemId, source: state.itemIdSource || "sticky" };
+    }
+
+    var fromHash = extractFromString(location.hash);
+    if (fromHash && /#\/(?:video|playback)/i.test(location.hash || "")) {
+      return { id: fromHash, source: "hash-video" };
     }
 
     var item = pmCurrentItem();
@@ -387,7 +413,6 @@
       if (fromCurrentSrc) return { id: fromCurrentSrc, source: "video.currentSrc" };
     }
 
-    var fromHash = extractFromString(location.hash);
     if (fromHash) return { id: fromHash, source: "hash" };
     var fromHref = extractFromString(location.href);
     if (fromHref) return { id: fromHref, source: "href" };
@@ -450,6 +475,19 @@
   }
 
   function findVideo() {
+    var selectors = [
+      ".videoPlayerContainer-onTop video.htmlvideoplayer",
+      ".videoPlayerContainer-onTop video",
+      ".videoPlayerContainer video.htmlvideoplayer",
+      ".videoPlayerContainer video",
+      "#videoPlayer video",
+      "video.htmlvideoplayer"
+    ];
+    for (var s = 0; s < selectors.length; s++) {
+      var preferred = document.querySelector(selectors[s]);
+      if (preferred && !preferred.ended) return preferred;
+    }
+
     var videos = document.querySelectorAll("video");
     for (var i = 0; i < videos.length; i++) {
       if (!videos[i].paused && !videos[i].ended) return videos[i];
@@ -492,6 +530,7 @@
 
     if (!hasAuthToken()) {
       warnOnce("no-auth", "mute fetch waiting for Jellyfin auth token (ApiClient or jellyfin_credentials)");
+      state.muteKey = null;
       return Promise.resolve(state.mutes || []);
     }
 
@@ -505,6 +544,7 @@
         state.cache[key] = { mutes: mutes, fetchedAt: Date.now() };
         state.mutes = mutes;
         state.muteKey = key;
+        delete state.warnOnceKeys["auth-401:" + path];
         log("loaded", mutes.length, "mutes for", itemId);
         if (mutes.length === 0) {
           warnOnce("empty-mutes:" + key, "mute API returned 0 ranges for item " + shortId(itemId));
@@ -819,6 +859,7 @@
       Events.on(pm, "playbackstop", function () {
         if (state.weMuted && state.video) applyMute(state.video, false);
         if (!findVideo()) {
+          state.video = null;
           state.itemId = null;
           state.itemIdSource = null;
           state.mutes = [];

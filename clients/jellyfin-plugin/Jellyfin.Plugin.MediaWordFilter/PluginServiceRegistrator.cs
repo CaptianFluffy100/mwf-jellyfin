@@ -1,6 +1,8 @@
+using Jellyfin.Plugin.MediaWordFilter.Hosted;
 using Jellyfin.Plugin.MediaWordFilter.Services;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.MediaWordFilter;
@@ -15,6 +17,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddHttpClient(MwfProxyService.HttpClientName);
         serviceCollection.AddSingleton<MwfProxyService>();
+        serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
         // ScriptInjectionStartupTask is discovered via IScheduledTask; no hosted service.
     }
 }
