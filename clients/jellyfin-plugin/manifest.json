@@ -8,12 +8,28 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.2.0",
+        "changelog": "Pass Newtonsoft JObject to File Transformation RegisterTransformation (matches Jellyfin Enhanced).",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-3/jellyfin-plugin-mediawordfilter_1.0.2.0.zip",
+        "checksum": "44966d9d55511e31d002c5eeacbef4e6",
+        "timestamp": "2026-07-23T17:15:00Z"
+      },
+      {
         "version": "1.0.1.0",
         "changelog": "Fix File Transformation registration timing via deferred startup task (same pattern as Jellyfin Enhanced).",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpah-2/jellyfin-plugin-mediawordfilter_1.0.1.0.zip",
         "checksum": "788651dff1c506a5b545b549f37c0641",
         "timestamp": "2026-07-23T16:50:00Z"
+      },
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release for Jellyfin 10.11.x: details/OSD UI, mute/profile proxy, next-episode prefetch.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha/jellyfin-plugin-mediawordfilter_1.0.0.0.zip",
+        "checksum": "2214f10e614bebdb29de94ef25722b0e",
+        "timestamp": "2026-07-23T00:00:00Z"
       }
     ]
   }

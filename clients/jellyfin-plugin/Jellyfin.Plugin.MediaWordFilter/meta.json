@@ -5,9 +5,9 @@
   "overview": "Server-side Media Word Filter companion: details-page profile controls, playback OSD toggle, mute proxy, and next-episode prefetch.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.1.0",
-  "changelog": "Fix File Transformation registration timing (startup task, same pattern as Jellyfin Enhanced).",
+  "version": "1.0.2.0",
+  "changelog": "Pass Newtonsoft JObject to File Transformation RegisterTransformation (matches Jellyfin Enhanced).",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T16:50:00Z"
+  "timestamp": "2026-07-23T17:15:00Z"
 }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace Jellyfin.Plugin.MediaWordFilter.Hosted;
 
@@ -156,8 +157,9 @@ public class ScriptInjectionStartupTask : IScheduledTask
             return false;
         }
 
-        // Match Jellyfin Enhanced: plain "index.html" pattern + dictionary/JObject-like payload.
-        var payload = new Dictionary<string, object?>
+        // File Transformation's RegisterTransformation requires Newtonsoft JObject
+        // (same payload shape as Jellyfin Enhanced).
+        var payload = new JObject
         {
             ["id"] = TransformationId.ToString(),
             ["fileNamePattern"] = "index.html",

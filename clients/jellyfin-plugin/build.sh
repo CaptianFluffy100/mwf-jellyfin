@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PROJ="$ROOT/Jellyfin.Plugin.MediaWordFilter"
 OUT="$ROOT/dist"
-VERSION="${PLUGIN_VERSION:-1.0.1.0}"
+VERSION="${PLUGIN_VERSION:-1.0.2.0}"
 ZIP_NAME="jellyfin-plugin-mediawordfilter_${VERSION}.zip"
 STAGE="$OUT/stage"
 BUILD="$OUT/build"
