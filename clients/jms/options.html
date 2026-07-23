@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MWF for Jellyfin — Options</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      label {
+        display: block;
+        margin-top: 1rem;
+        font-weight: 600;
+      }
+      input[type="text"],
+      input[type="url"],
+      input[type="number"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.4rem 0.5rem;
+        margin-top: 0.25rem;
+      }
+      .hint {
+        color: #555;
+        font-size: 0.9rem;
+        margin-top: 0.25rem;
+      }
+      .row {
+        margin-top: 0.75rem;
+      }
+      button {
+        margin-top: 1.25rem;
+        margin-right: 0.5rem;
+        padding: 0.45rem 0.9rem;
+      }
+      #status {
+        margin-top: 1rem;
+        min-height: 1.2rem;
+      }
+      .ok {
+        color: #00695c;
+      }
+      .err {
+        color: #b00020;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Media Word Filter — Jellyfin Web</h1>
+    <p>
+      Mutes filtered phrases during Jellyfin Web playback using the MWF mute API
+      (<code>GET /mutes/{item_id}?user_id=…</code>). Fetches run in the extension
+      background worker (no CORS dependency on Jellyfin).
+    </p>
+
+    <form id="form">
+      <label>
+        <input type="checkbox" id="enabled" checked />
+        Enable filtering
+      </label>
+
+      <label for="apiBase">MWF api_base URL</label>
+      <input type="url" id="apiBase" placeholder="http://192.168.1.10:8787" required />
+      <div class="hint">
+        Must be reachable from this browser (use LAN IP, not <code>127.0.0.1</code>, when MWF
+        runs on another machine). Set the same public base URL in MWF Settings if you use
+        personalized profiles.
+      </div>
+
+      <label for="userIdOverride">Jellyfin user_id override (optional)</label>
+      <input type="text" id="userIdOverride" placeholder="auto-detect from Jellyfin session" />
+      <div class="hint">
+        Leave blank to use <code>ApiClient.getCurrentUserId()</code> / stored Jellyfin
+        credentials. Override for testing or multi-account edge cases.
+      </div>
+
+      <label for="itemIdOverride">Item id override (optional)</label>
+      <input type="text" id="itemIdOverride" placeholder="auto-detect from playback / URL" />
+      <div class="hint">Manual debug override; skips URL/playback discovery when set.</div>
+
+      <label for="pollIntervalMs">Poll interval (ms)</label>
+      <input type="number" id="pollIntervalMs" min="50" max="2000" step="10" value="100" />
+      <div class="hint">Default 100 ms (same order as JMP Lua <code>poll_interval=0.1</code>).</div>
+
+      <label class="row">
+        <input type="checkbox" id="debug" />
+        Debug logging (<code>[mwf-jms]</code> in page console)
+      </label>
+
+      <button type="submit">Save</button>
+      <button type="button" id="testBtn">Test API connection</button>
+    </form>
+
+    <div id="status"></div>
+
+    <p class="hint">
+      Host permissions cover <code>http://*/*</code> and <code>https://*/*</code> so the
+      background worker can reach your MWF server and content scripts can run on your Jellyfin
+      URL (including custom ports and LAN IPs).
+    </p>
+
+    <script src="lib/mwf-common.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

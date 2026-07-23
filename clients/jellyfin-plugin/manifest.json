@@ -1,0 +1,20 @@
+[
+  {
+    "category": "General",
+    "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
+    "name": "Media Word Filter",
+    "description": "Mutes filtered phrases during Jellyfin Web playback using Media Word Filter mute data. Requires the File Transformation plugin for client script injection.",
+    "overview": "Server-side Media Word Filter companion: details-page profile controls, playback OSD toggle, mute proxy, and next-episode prefetch.",
+    "owner": "Media-Word-Filter",
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release for Jellyfin 10.11.x: details/OSD UI, mute/profile proxy, next-episode prefetch.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "",
+        "checksum": "2214f10e614bebdb29de94ef25722b0e",
+        "timestamp": "2026-07-23T00:00:00Z"
+      }
+    ]
+  }
+]

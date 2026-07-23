@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Media Word Filter for Jellyfin Web",
+  "version": "1.1.1",
+  "description": "Mute filtered phrases during Jellyfin Web playback using the Media Word Filter mute API.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["lib/mwf-common.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page-bridge.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
+  "action": {
+    "default_title": "MWF Jellyfin",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "media-word-filter-jellyfin@local.dev",
+      "strict_min_version": "109.0"
+    }
+  }
+}

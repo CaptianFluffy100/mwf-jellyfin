@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Word Filter</title>
+    <style>
+        .mwf-config { max-width: 42rem; }
+        .mwf-config .inputContainer { margin-bottom: 1.25rem; }
+        .mwf-config label { display: block; margin-bottom: 0.35rem; font-weight: 600; }
+        .mwf-config .fieldDescription { opacity: 0.75; font-size: 0.9em; margin-top: 0.35rem; }
+        .mwf-config input[type="text"],
+        .mwf-config input[type="number"] {
+            width: 100%;
+            max-width: 36rem;
+            box-sizing: border-box;
+            padding: 0.45rem 0.6rem;
+        }
+        .mwf-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+        #mwf-test-result { margin-top: 0.75rem; white-space: pre-wrap; }
+        .mwf-ok { color: #3dd68c; }
+        .mwf-err { color: #ff6b6b; }
+    </style>
+</head>
+<body>
+    <div id="mwfConfigPage" data-role="page" class="page type-interior pluginConfigurationPage mwf-config" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="mwfConfigForm">
+                    <div class="sectionTitleContainer">
+                        <h2 class="sectionTitle">Media Word Filter</h2>
+                    </div>
+                    <p>
+                        Admin-only settings. Jellyfin Web users never configure an MWF URL —
+                        the plugin proxies mute data through <code>/MediaWordFilter/…</code>.
+                        Requires the <strong>File Transformation</strong> plugin so the client script can load.
+                    </p>
+
+                    <div class="inputContainer">
+                        <label for="mwfBaseUrl">MWF base URL</label>
+                        <input is="emby-input" type="text" id="mwfBaseUrl" name="mwfBaseUrl" />
+                        <div class="fieldDescription">Example: <code>http://mwf:8787</code> or <code>http://192.168.1.10:8787</code></div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label for="mwfTimeout">Request timeout (seconds)</label>
+                        <input is="emby-input" type="number" id="mwfTimeout" name="mwfTimeout" min="1" max="120" />
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="mwfDetailsUi" />
+                            <span>Enable details-page profile / filter controls</span>
+                        </label>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="mwfOsdUi" />
+                            <span>Enable playback OSD settings button</span>
+                        </label>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="mwfPrefetch" />
+                            <span>Prefetch mute data for the next episode</span>
+                        </label>
+                    </div>
+
+                    <div class="mwf-actions">
+                        <button is="emby-button" type="submit" class="raised button-submit block">
+                            <span>Save</span>
+                        </button>
+                        <button is="emby-button" type="button" class="raised block" id="mwfTestBtn">
+                            <span>Test MWF connection</span>
+                        </button>
+                    </div>
+                    <div id="mwf-test-result"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var pluginId = "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34";
+
+            function getPage() {
+                return document.getElementById("mwfConfigPage") || document.querySelector(".mwf-config");
+            }
+
+            function load(page, config) {
+                page.querySelector("#mwfBaseUrl").value = config.MwfBaseUrl || "";
+                page.querySelector("#mwfTimeout").value = config.RequestTimeoutSeconds != null ? config.RequestTimeoutSeconds : 10;
+                page.querySelector("#mwfDetailsUi").checked = config.EnableDetailsUi !== false;
+                page.querySelector("#mwfOsdUi").checked = config.EnableOsdUi !== false;
+                page.querySelector("#mwfPrefetch").checked = config.EnablePrefetch !== false;
+            }
+
+            function save(page) {
+                return {
+                    MwfBaseUrl: (page.querySelector("#mwfBaseUrl").value || "").trim(),
+                    RequestTimeoutSeconds: parseInt(page.querySelector("#mwfTimeout").value, 10) || 10,
+                    EnableDetailsUi: !!page.querySelector("#mwfDetailsUi").checked,
+                    EnableOsdUi: !!page.querySelector("#mwfOsdUi").checked,
+                    EnablePrefetch: !!page.querySelector("#mwfPrefetch").checked
+                };
+            }
+
+            function onInit() {
+                var page = getPage();
+                if (!page || page.dataset.mwfBound === "1") return;
+                page.dataset.mwfBound = "1";
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    load(page, config || {});
+                });
+
+                page.querySelector("#mwfConfigForm").addEventListener("submit", function (e) {
+                    e.preventDefault();
+                    var cfg = save(page);
+                    ApiClient.updatePluginConfiguration(pluginId, cfg).then(function () {
+                        Dashboard.processPluginConfigurationUpdateResult();
+                    });
+                });
+
+                page.querySelector("#mwfTestBtn").addEventListener("click", function () {
+                    var el = page.querySelector("#mwf-test-result");
+                    el.className = "";
+                    el.textContent = "Testing…";
+                    var url = ApiClient.getUrl("MediaWordFilter/health");
+                    ApiClient.ajax({ type: "GET", url: url, dataType: "json" })
+                        .then(function (data) {
+                            el.className = "mwf-ok";
+                            el.textContent = "OK: " + JSON.stringify(data);
+                        })
+                        .catch(function (err) {
+                            el.className = "mwf-err";
+                            el.textContent = "Failed: " + (err && err.statusText ? err.statusText : String(err));
+                        });
+                });
+            }
+
+            // Jellyfin dashboard page lifecycle
+            document.addEventListener("viewshow", function (e) {
+                if (e && e.target && e.target.classList && e.target.classList.contains("pluginConfigurationPage")) {
+                    onInit();
+                }
+            });
+            // Fallback for direct load
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", onInit);
+            } else {
+                setTimeout(onInit, 0);
+            }
+        })();
+    </script>
+</body>
+</html>

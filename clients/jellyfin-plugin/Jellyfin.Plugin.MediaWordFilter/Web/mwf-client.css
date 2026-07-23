@@ -1,0 +1,78 @@
+/* Media Word Filter — Jellyfin Web injected styles */
+
+.mwf-details-panel {
+  margin: 0.75rem 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.35rem;
+  background: rgba(0, 0, 0, 0.28);
+  max-width: 28rem;
+}
+
+.mwf-details-panel .mwf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+
+.mwf-details-panel .mwf-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.mwf-details-panel select,
+.mwf-osd-popover select {
+  min-width: 10rem;
+  max-width: 100%;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #2b2b2b;
+  color: inherit;
+}
+
+.mwf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mwf-osd-btn.mwf-active {
+  color: #3dd68c;
+}
+
+.mwf-osd-popover {
+  position: absolute;
+  bottom: 3.25rem;
+  right: 0.5rem;
+  z-index: 10020;
+  min-width: 14rem;
+  padding: 0.75rem;
+  border-radius: 0.4rem;
+  background: rgba(28, 28, 28, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.mwf-osd-popover .mwf-pop-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.mwf-osd-popover .mwf-pop-title {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.mwf-hidden {
+  display: none !important;
+}
