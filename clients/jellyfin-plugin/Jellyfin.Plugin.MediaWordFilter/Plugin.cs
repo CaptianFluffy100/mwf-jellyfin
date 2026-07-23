@@ -89,9 +89,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         return string.Format(
             CultureInfo.InvariantCulture,
-            "{{\"enableDetailsUi\":{0},\"enableOsdUi\":{1},\"enablePrefetch\":{2}}}",
+            "{{\"enableDetailsUi\":{0},\"enablePrefetch\":{1}}}",
             Configuration.EnableDetailsUi ? "true" : "false",
-            Configuration.EnableOsdUi ? "true" : "false",
             Configuration.EnablePrefetch ? "true" : "false");
     }
 }

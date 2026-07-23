@@ -44,12 +44,6 @@
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
-                            <input is="emby-checkbox" type="checkbox" id="mwfOsdUi" />
-                            <span>Enable playback OSD settings button</span>
-                        </label>
-                    </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="mwfPrefetch" />
                             <span>Prefetch mute data for the next episode</span>
                         </label>
@@ -90,7 +84,6 @@
                         document.querySelector('#mwfBaseUrl').value = mwfRead(config, 'MwfBaseUrl', 'mwfBaseUrl', '') || '';
                         document.querySelector('#mwfTimeout').value = mwfRead(config, 'RequestTimeoutSeconds', 'requestTimeoutSeconds', 10);
                         document.querySelector('#mwfDetailsUi').checked = mwfRead(config, 'EnableDetailsUi', 'enableDetailsUi', true) !== false;
-                        document.querySelector('#mwfOsdUi').checked = mwfRead(config, 'EnableOsdUi', 'enableOsdUi', true) !== false;
                         document.querySelector('#mwfPrefetch').checked = mwfRead(config, 'EnablePrefetch', 'enablePrefetch', true) !== false;
                         Dashboard.hideLoadingMsg();
                     }).catch(function () {
@@ -106,7 +99,6 @@
                         mwfWrite(config, 'MwfBaseUrl', 'mwfBaseUrl', (document.querySelector('#mwfBaseUrl').value || '').trim());
                         mwfWrite(config, 'RequestTimeoutSeconds', 'requestTimeoutSeconds', parseInt(document.querySelector('#mwfTimeout').value, 10) || 10);
                         mwfWrite(config, 'EnableDetailsUi', 'enableDetailsUi', !!document.querySelector('#mwfDetailsUi').checked);
-                        mwfWrite(config, 'EnableOsdUi', 'enableOsdUi', !!document.querySelector('#mwfOsdUi').checked);
                         mwfWrite(config, 'EnablePrefetch', 'enablePrefetch', !!document.querySelector('#mwfPrefetch').checked);
 
                         return ApiClient.updatePluginConfiguration(MediaWordFilterConfig.pluginUniqueId, config).then(function (result) {

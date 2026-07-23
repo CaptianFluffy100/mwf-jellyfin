@@ -2,12 +2,12 @@
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
   "description": "Mutes filtered phrases during Jellyfin Web playback using Media Word Filter mute data. Requires the File Transformation plugin for client script injection.",
-  "overview": "Server-side Media Word Filter companion: details-page profile controls, playback OSD toggle, mute proxy, and next-episode prefetch.",
+  "overview": "Server-side Media Word Filter companion: details-page profile controls, mute proxy, and next-episode prefetch. Does not modify the playback media bar.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.4.0",
-  "changelog": "Stop OSD DOM thrashing that hid the playback media bar (debounce observer, no custom-element is=, no remount every poll).",
+  "version": "1.0.5.0",
+  "changelog": "Remove all playback media-bar / OSD injection so the player controls work normally again.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T17:40:00Z"
+  "timestamp": "2026-07-23T18:00:00Z"
 }

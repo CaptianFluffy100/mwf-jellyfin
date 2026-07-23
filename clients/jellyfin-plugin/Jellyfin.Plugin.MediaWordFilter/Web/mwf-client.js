@@ -1,7 +1,7 @@
 /**
  * Media Word Filter — Jellyfin Web client (server plugin).
- * Same mute contract as clients/jms: half-open [start_ms, end_ms) via video.muted.
- * APIs are same-origin under /MediaWordFilter/… (proxied by the C# plugin).
+ * Mute via video.muted; profile/filter UI only on the details page.
+ * Does NOT touch the playback OSD / media bar.
  */
 (function () {
   if (window.__MWF_CLIENT_LOADED__) return;
@@ -9,7 +9,6 @@
 
   var FLAGS = window.__MWF_PLUGIN__ || {
     enableDetailsUi: true,
-    enableOsdUi: true,
     enablePrefetch: true
   };
 
@@ -57,7 +56,6 @@
     profiles: [],
     profilesLoaded: false,
     itemId: null,
-    userId: null,
     mutes: [],
     muteKey: null,
     weMuted: false,
@@ -65,9 +63,7 @@
     video: null,
     cache: Object.create(null),
     fetchPending: Object.create(null),
-    detailsMountedFor: null,
-    osdBtn: null,
-    osdPop: null
+    detailsMountedFor: null
   };
 
   function log() {
@@ -172,7 +168,7 @@
   }
 
   function apiClient() {
-    return window.ApiClient || (window.ApiClient && window.ApiClient) || null;
+    return window.ApiClient || null;
   }
 
   function authHeaders() {
@@ -192,7 +188,7 @@
     if (c && typeof c.getUrl === "function") {
       return c.getUrl(path.replace(/^\//, ""));
     }
-    var base = (c && c.serverAddress()) || location.origin;
+    var base = (c && c.serverAddress && c.serverAddress()) || location.origin;
     return String(base).replace(/\/+$/, "") + "/" + path.replace(/^\//, "");
   }
 
@@ -374,10 +370,14 @@
       });
   }
 
+  function shortId(id) {
+    var n = normalizeItemId(id) || String(id);
+    return n.slice(0, 8);
+  }
+
   function fillProfileSelect(sel) {
     if (!sel) return;
     var curUser = currentUserId() || "";
-    var selected = state.profileUserId || curUser;
     sel.innerHTML = "";
 
     var optDefault = document.createElement("option");
@@ -393,16 +393,13 @@
       if (!id) continue;
       var opt = document.createElement("option");
       opt.value = id;
-      var name = p.display_name || p.displayName || shortId(id);
-      opt.textContent = name;
+      opt.textContent = p.display_name || p.displayName || shortId(id);
       sel.appendChild(opt);
     }
 
-    // If sticky profile matches an option, select it; else leave "" (current user)
     if (state.profileUserId) {
       sel.value = state.profileUserId;
       if (sel.value !== state.profileUserId) {
-        // profile missing from list — keep sticky via a synthetic option
         var syn = document.createElement("option");
         syn.value = state.profileUserId;
         syn.textContent = "Profile " + shortId(state.profileUserId);
@@ -412,14 +409,6 @@
     } else {
       sel.value = "";
     }
-
-    // Avoid unused var warning in some linters
-    void selected;
-  }
-
-  function shortId(id) {
-    var n = normalizeItemId(id) || String(id);
-    return n.slice(0, 8);
   }
 
   function syncUiControls() {
@@ -428,14 +417,8 @@
       document.querySelectorAll("input.mwf-filter-toggle").forEach(function (el) {
         el.checked = !!state.enabled;
       });
-      if (state.osdBtn && document.body.contains(state.osdBtn)) {
-        state.osdBtn.classList.toggle("mwf-active", !!state.enabled);
-        state.osdBtn.setAttribute("title", state.enabled ? "MWF filter on" : "MWF filter off");
-      }
     } catch (_) {}
   }
-
-  /* ---------- Details page UI ---------- */
 
   function isDetailsHash() {
     return /#\/details/i.test(location.hash || "");
@@ -515,108 +498,6 @@
     }
   }
 
-  /* ---------- OSD (conservative — do not thrash player chrome) ---------- */
-
-  function findOsdButtonHost() {
-    // Only attach to the native Jellyfin button row. Never invent a host or
-    // touch Media Bar Enhanced / unknown containers (that can hide the bar).
-    return (
-      document.querySelector(".videoOsdBottom-buttons") ||
-      document.querySelector(".videoOsdBottom .buttons") ||
-      document.querySelector(".htmlvideoplayer-osdbottom .buttons") ||
-      null
-    );
-  }
-
-  function closeOsdPopover() {
-    if (state.osdPop) {
-      try {
-        state.osdPop.remove();
-      } catch (_) {}
-      state.osdPop = null;
-    }
-  }
-
-  function openOsdPopover(btn) {
-    closeOsdPopover();
-    var pop = document.createElement("div");
-    pop.className = "mwf-osd-popover";
-    pop.innerHTML =
-      '<p class="mwf-pop-title">Media Word Filter</p>' +
-      '<div class="mwf-pop-row"><label>Profile</label>' +
-      '<select class="mwf-profile-select"></select></div>' +
-      '<div class="mwf-pop-row"><label class="mwf-toggle">' +
-      '<input type="checkbox" class="mwf-filter-toggle" /> Use filter</label></div>';
-
-    // Position relative to the button, not by rewriting OSD layout styles.
-    var host = btn.parentElement || document.body;
-    host.appendChild(pop);
-    state.osdPop = pop;
-
-    var sel = pop.querySelector("select.mwf-profile-select");
-    var chk = pop.querySelector("input.mwf-filter-toggle");
-    loadProfiles().then(function () {
-      fillProfileSelect(sel);
-      chk.checked = !!state.enabled;
-    });
-    sel.addEventListener("change", function () {
-      writeProfile(sel.value || "");
-    });
-    chk.addEventListener("change", function () {
-      writeEnabled(chk.checked);
-    });
-
-    setTimeout(function () {
-      function onDoc(ev) {
-        if (!pop.contains(ev.target) && ev.target !== btn) {
-          closeOsdPopover();
-          document.removeEventListener("click", onDoc, true);
-        }
-      }
-      document.addEventListener("click", onDoc, true);
-    }, 0);
-  }
-
-  function mountOsdButton() {
-    if (!FLAGS.enableOsdUi) return;
-    try {
-      var host = findOsdButtonHost();
-      if (!host) {
-        if (state.osdBtn && !document.body.contains(state.osdBtn)) {
-          state.osdBtn = null;
-        }
-        return;
-      }
-      if (state.osdBtn && host.contains(state.osdBtn)) return;
-
-      // Plain button only — do NOT set is="paper-icon-button-light" after createElement;
-      // that breaks custom-element upgrades and can wreck the whole OSD row.
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "paper-icon-button-light mwf-osd-btn";
-      btn.setAttribute("title", "Media Word Filter");
-      btn.setAttribute("aria-label", "Media Word Filter");
-      btn.innerHTML = '<span class="material-icons" aria-hidden="true">volume_off</span>';
-      btn.addEventListener("click", function (ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (state.osdPop) closeOsdPopover();
-        else openOsdPopover(btn);
-      });
-
-      state._mwfDomQuiet = true;
-      host.appendChild(btn);
-      state.osdBtn = btn;
-      state._mwfDomQuiet = false;
-      syncUiControls();
-    } catch (err) {
-      state._mwfDomQuiet = false;
-      log("mountOsdButton error", err);
-    }
-  }
-
-  /* ---------- Prefetch next episode ---------- */
-
   function prefetchNextEpisode(itemId) {
     if (!FLAGS.enablePrefetch || !state.enabled) return;
     var c = apiClient();
@@ -626,40 +507,28 @@
     c.getItem(userId, itemId)
       .then(function (item) {
         if (!item || item.Type !== "Episode") return null;
-        var seriesId = item.SeriesId;
         var seasonId = item.SeasonId;
         var index = Number(item.IndexNumber);
-        if (!seriesId || !Number.isFinite(index)) return null;
+        if (!seasonId || !Number.isFinite(index) || typeof c.getItems !== "function") return null;
 
-        // Prefer episodes of same season with IndexNumber + 1
-        if (seasonId && typeof c.getItems === "function") {
-          return c
-            .getItems(userId, {
-              ParentId: seasonId,
-              IncludeItemTypes: "Episode",
-              Recursive: true,
-              Fields: "IndexNumber",
-              SortBy: "IndexNumber",
-              SortOrder: "Ascending"
-            })
-            .then(function (result) {
-              var items = (result && result.Items) || [];
-              for (var i = 0; i < items.length; i++) {
-                if (Number(items[i].IndexNumber) === index + 1 && items[i].Id) {
-                  return normalizeItemId(items[i].Id);
-                }
+        return c
+          .getItems(userId, {
+            ParentId: seasonId,
+            IncludeItemTypes: "Episode",
+            Recursive: true,
+            Fields: "IndexNumber",
+            SortBy: "IndexNumber",
+            SortOrder: "Ascending"
+          })
+          .then(function (result) {
+            var items = (result && result.Items) || [];
+            for (var i = 0; i < items.length; i++) {
+              if (Number(items[i].IndexNumber) === index + 1 && items[i].Id) {
+                return normalizeItemId(items[i].Id);
               }
-              return null;
-            });
-        }
-
-        if (typeof c.getNextUpEpisodes === "function") {
-          return c.getNextUpEpisodes({ UserId: userId, SeriesId: seriesId, Limit: 1 }).then(function (r) {
-            var items = (r && r.Items) || [];
-            return items[0] && items[0].Id ? normalizeItemId(items[0].Id) : null;
+            }
+            return null;
           });
-        }
-        return null;
       })
       .then(function (nextId) {
         if (nextId && nextId !== itemId) {
@@ -671,8 +540,6 @@
         log("prefetch failed", err);
       });
   }
-
-  /* ---------- Mute tick ---------- */
 
   function applyMute(video, shouldMute) {
     if (!video) return;
@@ -697,9 +564,7 @@
       if (itemId !== state.itemId) {
         state.itemId = itemId;
         state.muteKey = null;
-        if (state.weMuted && video) {
-          applyMute(video, false);
-        }
+        if (state.weMuted && video) applyMute(video, false);
         if (itemId) {
           ensureMutes(itemId, false).then(function () {
             prefetchNextEpisode(itemId);
@@ -709,46 +574,30 @@
         }
       }
 
-      // Do NOT remount OSD every poll — that fights Jellyfin / Media Bar Enhanced.
-
       if (!video || !state.enabled || !state.mutes || !state.mutes.length) {
         if (state.weMuted) applyMute(video, false);
         return;
       }
 
-      var t = playbackMs(video);
-      applyMute(video, inMuteRange(t, state.mutes));
+      applyMute(video, inMuteRange(playbackMs(video), state.mutes));
     } catch (err) {
       log("tick error", err);
     }
   }
 
+  function onRouteChange() {
+    state.detailsMountedFor = null;
+    setTimeout(function () {
+      mountDetailsPanel();
+      tick();
+    }, 100);
+  }
+
   function hookHistory() {
-    var fire = function () {
-      state.detailsMountedFor = null;
-      state.osdBtn = null;
-      closeOsdPopover();
-      setTimeout(function () {
-        mountDetailsPanel();
-        mountOsdButton();
-        tick();
-      }, 100);
-    };
     try {
-      var origPush = history.pushState.bind(history);
-      var origReplace = history.replaceState.bind(history);
-      history.pushState = function () {
-        var ret = origPush.apply(history, arguments);
-        fire();
-        return ret;
-      };
-      history.replaceState = function () {
-        var ret = origReplace.apply(history, arguments);
-        fire();
-        return ret;
-      };
-      window.addEventListener("popstate", fire);
-      window.addEventListener("hashchange", fire);
+      window.addEventListener("popstate", onRouteChange);
+      window.addEventListener("hashchange", onRouteChange);
+      // Do not wrap history.pushState/replaceState — that can break player UI.
     } catch (err) {
       log("hookHistory error", err);
     }
@@ -761,21 +610,14 @@
       if (Events && pm && typeof Events.on === "function") {
         Events.on(pm, "playbackstart", function () {
           state.itemId = null;
-          state.osdBtn = null;
-          setTimeout(function () {
-            mountOsdButton();
-            tick();
-          }, 300);
+          tick();
         });
         Events.on(pm, "playbackstop", function () {
-          closeOsdPopover();
           if (state.weMuted && state.video) applyMute(state.video, false);
-          state.osdBtn = null;
         });
         Events.on(pm, "playerchange", function () {
           state.itemId = null;
-          state.osdBtn = null;
-          setTimeout(mountOsdButton, 300);
+          tick();
         });
       }
     } catch (_) {}
@@ -783,17 +625,15 @@
 
   function observeDom() {
     var timer = null;
-    var obs = new MutationObserver(function () {
-      if (state._mwfDomQuiet) return;
-      if (timer) clearTimeout(timer);
-      // Debounce heavily — continuous OSD rebuild loops hide the media bar.
-      timer = setTimeout(function () {
-        timer = null;
-        mountDetailsPanel();
-        mountOsdButton();
-      }, 400);
-    });
     try {
+      var obs = new MutationObserver(function () {
+        if (!isDetailsHash()) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () {
+          timer = null;
+          mountDetailsPanel();
+        }, 400);
+      });
       obs.observe(document.documentElement, { childList: true, subtree: true });
     } catch (_) {}
   }
@@ -807,7 +647,7 @@
       mountDetailsPanel();
       setInterval(tick, POLL_MS);
       tick();
-      log("client ready", FLAGS);
+      log("client ready (no OSD injection)", FLAGS);
     } catch (err) {
       console.warn("[mwf-plugin] init failed", err);
     }

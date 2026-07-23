@@ -23,11 +23,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableDetailsUi { get; set; } = true;
 
     /// <summary>
-    /// Inject an OSD / play-bar settings button during playback.
-    /// </summary>
-    public bool EnableOsdUi { get; set; } = true;
-
-    /// <summary>
     /// Prefetch mute ranges for the next episode while watching a series.
     /// </summary>
     public bool EnablePrefetch { get; set; } = true;

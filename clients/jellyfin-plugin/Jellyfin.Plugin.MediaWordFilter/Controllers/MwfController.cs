@@ -37,8 +37,8 @@ public class MwfController : ControllerBase
     {
         var css = ReadEmbedded("Web.mwf-client.css");
         var js = ReadEmbedded("Web.mwf-client.js");
-        var flags = Plugin.Instance?.GetClientFlagsJson() ??
-                    "{\"enableDetailsUi\":true,\"enableOsdUi\":true,\"enablePrefetch\":true}";
+                        var flags = Plugin.Instance?.GetClientFlagsJson() ??
+                    "{\"enableDetailsUi\":true,\"enablePrefetch\":true}";
 
         var sb = new StringBuilder(css.Length + js.Length + 512);
         sb.Append("(function(){");
@@ -138,7 +138,6 @@ public class MwfController : ControllerBase
         return Ok(new
         {
             enableDetailsUi = plugin.Configuration.EnableDetailsUi,
-            enableOsdUi = plugin.Configuration.EnableOsdUi,
             enablePrefetch = plugin.Configuration.EnablePrefetch,
             mwfConfigured = !string.IsNullOrWhiteSpace(plugin.GetMwfBaseUrl())
         });
