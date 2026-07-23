@@ -56,6 +56,7 @@ public class MwfController : ControllerBase
         sb.Append('\n');
         sb.Append(js);
 
+        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
         return Content(sb.ToString(), "application/javascript", Encoding.UTF8);
     }
 

@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.10.0",
+        "changelog": "Fix mute fetch auth/retry, protect loaded mutes from playbackstop, sticky id priority, and console diagnostics.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-10/jellyfin-plugin-mediawordfilter_1.0.10.0.zip",
+        "checksum": "1126805a1f8dd24ac2b5c824f812e0e9",
+        "timestamp": "2026-07-23T23:00:00Z"
+      },
+      {
         "version": "1.0.9.0",
         "changelog": "Fix playback mute: sticky item id, PlaybackManager resolution, and video.src fallback (matches JMS).",
         "targetAbi": "10.11.0.0",

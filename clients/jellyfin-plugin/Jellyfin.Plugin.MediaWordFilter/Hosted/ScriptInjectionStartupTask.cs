@@ -145,7 +145,7 @@ public class ScriptInjectionStartupTask : IScheduledTask
             RegexOptions.IgnoreCase);
 
         const string scriptTag =
-            "<script defer src=\"/MediaWordFilter/ClientScript\" " + marker + "></script>";
+            "<script defer src=\"/MediaWordFilter/ClientScript?v=1.0.10.0\" " + marker + "></script>";
 
         if (contents.Contains("</body>", StringComparison.OrdinalIgnoreCase))
         {

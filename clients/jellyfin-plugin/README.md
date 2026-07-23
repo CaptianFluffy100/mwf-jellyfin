@@ -2,7 +2,9 @@
 
 C# plugin for **Jellyfin 10.11.x**: Dashboard config, authenticated `/MediaWordFilter/…` proxy to your MWF service, and details-page UI in Jellyfin Web (profile + filter toggle under Audio).
 
-**1.0.9** fixes playback muting: sticky item id while video plays, expanded PlaybackManager resolution, and stream URL fallback (aligned with the JMS browser extension). Details-page UI unchanged; playback OSD injection remains disabled.
+**1.0.10** fixes mute fetch auth/retry (credentials token fallback, no permanent cache on 401), protects loaded mutes from spurious `playbackstop`, prioritizes sticky item id during playback, and adds one-shot console diagnostics. Set `window.__MWF_DEBUG__ = true` for verbose logs.
+
+**1.0.9** fixed sticky item id and PlaybackManager resolution (details → play still had gaps fixed in 1.0.10).
 
 ## Requirements
 
@@ -30,7 +32,7 @@ chmod +x build.sh
 
 Produces:
 
-- `dist/jellyfin-plugin-mediawordfilter_1.0.9.0.zip` (DLL + `meta.json`)
+- `dist/jellyfin-plugin-mediawordfilter_1.0.10.0.zip` (DLL + `meta.json`)
 - Updated `manifest.json` checksum
 
 Or with a local SDK:

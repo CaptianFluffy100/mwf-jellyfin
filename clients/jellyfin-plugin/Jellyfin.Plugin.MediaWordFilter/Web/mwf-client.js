@@ -56,6 +56,8 @@
     }
   ];
 
+  var CLIENT_VERSION = "1.0.10.0";
+
   var state = {
     enabled: readEnabled(),
     profileUserId: readProfile(),
@@ -70,13 +72,24 @@
     video: null,
     cache: Object.create(null),
     fetchPending: Object.create(null),
-    detailsMountedFor: null
+    detailsMountedFor: null,
+    playbackHooksAttached: false,
+    warnOnceKeys: Object.create(null),
+    lastTickDiag: null
   };
 
   function log() {
     if (!window.__MWF_DEBUG__) return;
     var args = ["[mwf-plugin]"].concat(Array.prototype.slice.call(arguments));
     console.log.apply(console, args);
+  }
+
+  function warnOnce(key, message, detail) {
+    if (state.warnOnceKeys[key]) return;
+    state.warnOnceKeys[key] = true;
+    var args = ["[mwf-plugin]", message];
+    if (detail !== undefined && detail !== null) args.push(detail);
+    console.warn.apply(console, args);
   }
 
   function readEnabled() {
@@ -188,16 +201,44 @@
     return null;
   }
 
+  function accessTokenFromCredentials() {
+    try {
+      for (var i = 0; i < 2; i++) {
+        var store = i === 0 ? localStorage : sessionStorage;
+        var raw = store.getItem("jellyfin_credentials");
+        if (!raw) continue;
+        var parsed = JSON.parse(raw);
+        var servers = parsed && (parsed.Servers || parsed.servers);
+        if (Array.isArray(servers)) {
+          for (var j = 0; j < servers.length; j++) {
+            var tok = servers[j].AccessToken || servers[j].accessToken;
+            if (tok) return tok;
+          }
+        }
+        if (parsed && (parsed.AccessToken || parsed.accessToken)) {
+          return parsed.AccessToken || parsed.accessToken;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   function authHeaders() {
     var c = apiClient();
     var headers = { Accept: "application/json" };
+    var tok = null;
     try {
       if (c && typeof c.getAccessToken === "function") {
-        var tok = c.getAccessToken();
-        if (tok) headers["X-Emby-Token"] = tok;
+        tok = c.getAccessToken();
       }
     } catch (_) {}
+    if (!tok) tok = accessTokenFromCredentials();
+    if (tok) headers["X-Emby-Token"] = tok;
     return headers;
+  }
+
+  function hasAuthToken() {
+    return !!authHeaders()["X-Emby-Token"];
   }
 
   function apiUrl(path) {
@@ -292,6 +333,14 @@
    * Resolve Jellyfin item Id (never MediaSourceId). Sticky while a video element exists.
    */
   function resolvePlaybackItemId(video) {
+    if (video && state.itemId && state.muteKey === cacheKey(state.itemId)) {
+      return { id: state.itemId, source: state.itemIdSource || "sticky-loaded" };
+    }
+
+    if (video && state.itemId) {
+      return { id: state.itemId, source: state.itemIdSource || "sticky" };
+    }
+
     var item = pmCurrentItem();
     if (item && item.Id) {
       var fromPm = normalizeItemId(item.Id);
@@ -328,10 +377,6 @@
         if (fromApi) return { id: fromApi, source: "ApiClient.getCurrentItemId" };
       }
     } catch (_) {}
-
-    if (video && state.itemId) {
-      return { id: state.itemId, source: state.itemIdSource || "sticky" };
-    }
 
     if (video && video.src) {
       var fromSrc = extractFromString(video.src);
@@ -432,7 +477,8 @@
     }
 
     var key = cacheKey(itemId);
-    if (!force && state.muteKey === key && state.mutes) {
+    if (!force && state.muteKey === key && state.cache[key]) {
+      state.mutes = state.cache[key].mutes;
       return Promise.resolve(state.mutes);
     }
     if (state.cache[key] && !force) {
@@ -442,6 +488,11 @@
     }
     if (state.fetchPending[key] && !force) {
       return state.fetchPending[key];
+    }
+
+    if (!hasAuthToken()) {
+      warnOnce("no-auth", "mute fetch waiting for Jellyfin auth token (ApiClient or jellyfin_credentials)");
+      return Promise.resolve(state.mutes || []);
     }
 
     var uid = effectiveProfileUserId();
@@ -455,13 +506,17 @@
         state.mutes = mutes;
         state.muteKey = key;
         log("loaded", mutes.length, "mutes for", itemId);
+        if (mutes.length === 0) {
+          warnOnce("empty-mutes:" + key, "mute API returned 0 ranges for item " + shortId(itemId));
+        } else {
+          delete state.warnOnceKeys["empty-mutes:" + key];
+        }
         return mutes;
       })
       .catch(function (err) {
-        log("mute fetch failed", err);
-        state.mutes = [];
-        state.muteKey = key;
-        return [];
+        warnOnce("fetch-fail:" + key, "mute fetch failed for item " + shortId(itemId), err);
+        state.muteKey = null;
+        return state.mutes || [];
       })
       .finally(function () {
         delete state.fetchPending[key];
@@ -683,6 +738,28 @@
     }
   }
 
+  function tickDiagnostics(video) {
+    if (!state.enabled) return;
+    var diag = !video
+      ? "no-video"
+      : !state.itemId
+        ? "no-item-id"
+        : !state.mutes || !state.mutes.length
+          ? "no-mutes"
+          : "ready";
+    if (diag === state.lastTickDiag) return;
+    state.lastTickDiag = diag;
+    if (diag === "no-video" && /#\/video/i.test(location.hash || "")) {
+      warnOnce("no-video", "video element not found on #/video route");
+    } else if (diag === "no-item-id" && video) {
+      warnOnce("no-item-id", "could not resolve Jellyfin item id during playback");
+    } else if (diag === "no-mutes" && video && state.itemId) {
+      warnOnce("no-mutes:" + cacheKey(state.itemId), "no mute ranges loaded for item " + shortId(state.itemId));
+    } else if (diag === "ready") {
+      log("mute loop ready", state.mutes.length, "ranges for", shortId(state.itemId));
+    }
+  }
+
   function tick(forceRefresh) {
     try {
       var video = findVideo();
@@ -690,17 +767,24 @@
 
       if (!state.enabled) {
         if (state.weMuted) applyMute(video, false);
+        tickDiagnostics(video);
         return;
+      }
+
+      if (video && state.itemId && (!state.mutes || !state.mutes.length) && !state.fetchPending[cacheKey(state.itemId)]) {
+        ensureMutes(state.itemId, false);
       }
 
       if (!video || !state.mutes || !state.mutes.length) {
         if (state.weMuted) applyMute(video, false);
+        tickDiagnostics(video);
         return;
       }
 
       applyMute(video, inMuteRange(playbackMs(video), state.mutes));
+      tickDiagnostics(video);
     } catch (err) {
-      log("tick error", err);
+      warnOnce("tick-error", "tick error", err);
     }
   }
 
@@ -723,25 +807,43 @@
   }
 
   function hookPlaybackEvents() {
+    if (state.playbackHooksAttached) return false;
     try {
       var Events = window.Events;
       var pm = playbackManager();
-      if (Events && pm && typeof Events.on === "function") {
-        Events.on(pm, "playbackstart", function () {
-          tick(true);
-        });
-        Events.on(pm, "playbackstop", function () {
-          if (state.weMuted && state.video) applyMute(state.video, false);
+      if (!Events || !pm || typeof Events.on !== "function") return false;
+
+      Events.on(pm, "playbackstart", function () {
+        tick(true);
+      });
+      Events.on(pm, "playbackstop", function () {
+        if (state.weMuted && state.video) applyMute(state.video, false);
+        if (!findVideo()) {
           state.itemId = null;
           state.itemIdSource = null;
           state.mutes = [];
           state.muteKey = null;
-        });
-        Events.on(pm, "playerchange", function () {
-          tick(true);
-        });
-      }
-    } catch (_) {}
+        }
+      });
+      Events.on(pm, "playerchange", function () {
+        tick(true);
+      });
+      state.playbackHooksAttached = true;
+      log("playback events hooked");
+      return true;
+    } catch (err) {
+      log("hookPlaybackEvents error", err);
+      return false;
+    }
+  }
+
+  function ensurePlaybackHooks() {
+    if (hookPlaybackEvents()) return;
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts++;
+      if (hookPlaybackEvents() || attempts >= 60) clearInterval(timer);
+    }, 500);
   }
 
   function observeDom() {
@@ -767,12 +869,12 @@
     try {
       loadProfiles();
       hookHistory();
-      hookPlaybackEvents();
+      ensurePlaybackHooks();
       observeDom();
       mountDetailsPanel();
       setInterval(tick, POLL_MS);
       tick();
-      log("client ready (no OSD injection)", FLAGS);
+      log("client ready v" + CLIENT_VERSION, FLAGS);
     } catch (err) {
       console.warn("[mwf-plugin] init failed", err);
     }
