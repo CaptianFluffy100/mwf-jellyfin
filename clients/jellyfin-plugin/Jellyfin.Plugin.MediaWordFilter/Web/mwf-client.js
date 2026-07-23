@@ -423,14 +423,16 @@
   }
 
   function syncUiControls() {
-    document.querySelectorAll("select.mwf-profile-select").forEach(fillProfileSelect);
-    document.querySelectorAll("input.mwf-filter-toggle").forEach(function (el) {
-      el.checked = !!state.enabled;
-    });
-    if (state.osdBtn) {
-      state.osdBtn.classList.toggle("mwf-active", !!state.enabled);
-      state.osdBtn.setAttribute("title", state.enabled ? "MWF filter on" : "MWF filter off");
-    }
+    try {
+      document.querySelectorAll("select.mwf-profile-select").forEach(fillProfileSelect);
+      document.querySelectorAll("input.mwf-filter-toggle").forEach(function (el) {
+        el.checked = !!state.enabled;
+      });
+      if (state.osdBtn && document.body.contains(state.osdBtn)) {
+        state.osdBtn.classList.toggle("mwf-active", !!state.enabled);
+        state.osdBtn.setAttribute("title", state.enabled ? "MWF filter on" : "MWF filter off");
+      }
+    } catch (_) {}
   }
 
   /* ---------- Details page UI ---------- */
@@ -444,101 +446,93 @@
       ".selectAudio",
       "select.selectAudio",
       '[data-action="Audio"]',
-      ".audioStreamPicker",
-      ".mediaInfoItem select",
-      ".detailSectionContent select"
+      ".audioStreamPicker"
     ];
     for (var i = 0; i < selectors.length; i++) {
       var el = document.querySelector(selectors[i]);
       if (el) return el;
     }
-
-    // Heuristic: label text containing Audio
-    var labels = document.querySelectorAll("label, .fieldDescription, .selectLabel");
-    for (var j = 0; j < labels.length; j++) {
-      var t = (labels[j].textContent || "").toLowerCase();
-      if (t.indexOf("audio") >= 0) {
-        var group = labels[j].closest(".selectContainer, .inputContainer, .mediaInfoItem, .detailSection");
-        if (group) {
-          var sel = group.querySelector("select");
-          if (sel) return sel;
-          return group;
-        }
-      }
-    }
     return null;
   }
 
   function mountDetailsPanel() {
-    if (!FLAGS.enableDetailsUi || !isDetailsHash()) {
-      var old = document.getElementById("mwf-details-panel");
-      if (old) old.remove();
-      state.detailsMountedFor = null;
-      return;
+    try {
+      if (!FLAGS.enableDetailsUi || !isDetailsHash()) {
+        var old = document.getElementById("mwf-details-panel");
+        if (old) old.remove();
+        state.detailsMountedFor = null;
+        return;
+      }
+
+      var itemId = extractFromString(location.hash) || extractFromString(location.href);
+      var anchor = findAudioAnchor();
+      if (!anchor) return;
+
+      var existing = document.getElementById("mwf-details-panel");
+      if (existing && state.detailsMountedFor === itemId) return;
+
+      if (existing) existing.remove();
+
+      var panel = document.createElement("div");
+      panel.id = "mwf-details-panel";
+      panel.className = "mwf-details-panel";
+      panel.innerHTML =
+        '<p class="mwf-label">Media Word Filter</p>' +
+        '<div class="mwf-row">' +
+        '<label class="mwf-toggle"><span>Profile</span></label>' +
+        '<select class="mwf-profile-select" aria-label="MWF profile"></select>' +
+        "</div>" +
+        '<div class="mwf-row">' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-filter-toggle" /> Use filter</label>' +
+        "</div>";
+
+      var mountParent =
+        anchor.closest(".selectContainer, .inputContainer, .mediaInfoItem") || anchor.parentElement;
+      if (mountParent && mountParent.parentElement) {
+        mountParent.insertAdjacentElement("afterend", panel);
+      } else {
+        anchor.insertAdjacentElement("afterend", panel);
+      }
+
+      var sel = panel.querySelector("select.mwf-profile-select");
+      var chk = panel.querySelector("input.mwf-filter-toggle");
+      sel.addEventListener("change", function () {
+        writeProfile(sel.value || "");
+      });
+      chk.addEventListener("change", function () {
+        writeEnabled(chk.checked);
+      });
+
+      state.detailsMountedFor = itemId;
+      loadProfiles().then(function () {
+        fillProfileSelect(sel);
+        chk.checked = !!state.enabled;
+      });
+
+      if (itemId) ensureMutes(itemId, false);
+    } catch (err) {
+      log("mountDetailsPanel error", err);
     }
-
-    var itemId = extractFromString(location.hash) || extractFromString(location.href);
-    var anchor = findAudioAnchor();
-    if (!anchor) return;
-
-    var existing = document.getElementById("mwf-details-panel");
-    if (existing && state.detailsMountedFor === itemId) return;
-
-    if (existing) existing.remove();
-
-    var panel = document.createElement("div");
-    panel.id = "mwf-details-panel";
-    panel.className = "mwf-details-panel";
-    panel.innerHTML =
-      '<p class="mwf-label">Media Word Filter</p>' +
-      '<div class="mwf-row">' +
-      '<label class="mwf-toggle"><span>Profile</span></label>' +
-      '<select class="mwf-profile-select" aria-label="MWF profile"></select>' +
-      "</div>" +
-      '<div class="mwf-row">' +
-      '<label class="mwf-toggle"><input type="checkbox" class="mwf-filter-toggle" /> Use filter</label>' +
-      "</div>";
-
-    var mountParent = anchor.closest(".selectContainer, .inputContainer, .mediaInfoItem") || anchor.parentElement;
-    if (mountParent && mountParent.parentElement) {
-      mountParent.insertAdjacentElement("afterend", panel);
-    } else {
-      anchor.insertAdjacentElement("afterend", panel);
-    }
-
-    var sel = panel.querySelector("select.mwf-profile-select");
-    var chk = panel.querySelector("input.mwf-filter-toggle");
-    sel.addEventListener("change", function () {
-      writeProfile(sel.value || "");
-    });
-    chk.addEventListener("change", function () {
-      writeEnabled(chk.checked);
-    });
-
-    state.detailsMountedFor = itemId;
-    loadProfiles().then(function () {
-      fillProfileSelect(sel);
-      chk.checked = !!state.enabled;
-    });
-
-    // Warm mute cache for this details item
-    if (itemId) ensureMutes(itemId, false);
   }
 
-  /* ---------- OSD ---------- */
+  /* ---------- OSD (conservative — do not thrash player chrome) ---------- */
 
-  function findOsdBar() {
+  function findOsdButtonHost() {
+    // Only attach to the native Jellyfin button row. Never invent a host or
+    // touch Media Bar Enhanced / unknown containers (that can hide the bar).
     return (
-      document.querySelector(".videoOsdBottom-maincontrols") ||
-      document.querySelector(".videoOsdBottom") ||
-      document.querySelector(".osdControls") ||
-      document.querySelector(".htmlvideoplayer-buttons")
+      document.querySelector(".videoOsdBottom-buttons") ||
+      document.querySelector(".videoOsdBottom .buttons") ||
+      document.querySelector(".htmlvideoplayer-osdbottom .buttons") ||
+      null
     );
   }
 
   function closeOsdPopover() {
     if (state.osdPop) {
-      state.osdPop.remove();
+      try {
+        state.osdPop.remove();
+      } catch (_) {}
       state.osdPop = null;
     }
   }
@@ -554,9 +548,9 @@
       '<div class="mwf-pop-row"><label class="mwf-toggle">' +
       '<input type="checkbox" class="mwf-filter-toggle" /> Use filter</label></div>';
 
-    var bar = findOsdBar() || btn.parentElement || document.body;
-    bar.style.position = bar.style.position || "relative";
-    bar.appendChild(pop);
+    // Position relative to the button, not by rewriting OSD layout styles.
+    var host = btn.parentElement || document.body;
+    host.appendChild(pop);
     state.osdPop = pop;
 
     var sel = pop.querySelector("select.mwf-profile-select");
@@ -585,35 +579,40 @@
 
   function mountOsdButton() {
     if (!FLAGS.enableOsdUi) return;
-    var bar = findOsdBar();
-    if (!bar) {
-      if (state.osdBtn && !document.body.contains(state.osdBtn)) {
-        state.osdBtn = null;
+    try {
+      var host = findOsdButtonHost();
+      if (!host) {
+        if (state.osdBtn && !document.body.contains(state.osdBtn)) {
+          state.osdBtn = null;
+        }
+        return;
       }
-      return;
+      if (state.osdBtn && host.contains(state.osdBtn)) return;
+
+      // Plain button only — do NOT set is="paper-icon-button-light" after createElement;
+      // that breaks custom-element upgrades and can wreck the whole OSD row.
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "paper-icon-button-light mwf-osd-btn";
+      btn.setAttribute("title", "Media Word Filter");
+      btn.setAttribute("aria-label", "Media Word Filter");
+      btn.innerHTML = '<span class="material-icons" aria-hidden="true">volume_off</span>';
+      btn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (state.osdPop) closeOsdPopover();
+        else openOsdPopover(btn);
+      });
+
+      state._mwfDomQuiet = true;
+      host.appendChild(btn);
+      state.osdBtn = btn;
+      state._mwfDomQuiet = false;
+      syncUiControls();
+    } catch (err) {
+      state._mwfDomQuiet = false;
+      log("mountOsdButton error", err);
     }
-    if (state.osdBtn && bar.contains(state.osdBtn)) return;
-
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "paper-icon-button-light mwf-osd-btn";
-    btn.setAttribute("is", "paper-icon-button-light");
-    btn.setAttribute("title", "Media Word Filter");
-    btn.innerHTML = '<span class="material-icons volume_off" aria-hidden="true"></span>';
-    btn.addEventListener("click", function (ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (state.osdPop) closeOsdPopover();
-      else openOsdPopover(btn);
-    });
-
-    var buttons =
-      bar.querySelector(".videoOsdBottom-buttons") ||
-      bar.querySelector(".osdControls") ||
-      bar;
-    buttons.appendChild(btn);
-    state.osdBtn = btn;
-    syncUiControls();
   }
 
   /* ---------- Prefetch next episode ---------- */
@@ -690,55 +689,69 @@
   }
 
   function tick() {
-    var video = findVideo();
-    state.video = video;
+    try {
+      var video = findVideo();
+      state.video = video;
 
-    var itemId = playbackItemId();
-    if (itemId !== state.itemId) {
-      state.itemId = itemId;
-      state.muteKey = null;
-      if (state.weMuted && video) {
-        applyMute(video, false);
+      var itemId = playbackItemId();
+      if (itemId !== state.itemId) {
+        state.itemId = itemId;
+        state.muteKey = null;
+        if (state.weMuted && video) {
+          applyMute(video, false);
+        }
+        if (itemId) {
+          ensureMutes(itemId, false).then(function () {
+            prefetchNextEpisode(itemId);
+          });
+        } else {
+          state.mutes = [];
+        }
       }
-      if (itemId) {
-        ensureMutes(itemId, false).then(function () {
-          prefetchNextEpisode(itemId);
-        });
-      } else {
-        state.mutes = [];
+
+      // Do NOT remount OSD every poll — that fights Jellyfin / Media Bar Enhanced.
+
+      if (!video || !state.enabled || !state.mutes || !state.mutes.length) {
+        if (state.weMuted) applyMute(video, false);
+        return;
       }
+
+      var t = playbackMs(video);
+      applyMute(video, inMuteRange(t, state.mutes));
+    } catch (err) {
+      log("tick error", err);
     }
-
-    mountOsdButton();
-
-    if (!video || !state.enabled || !state.mutes || !state.mutes.length) {
-      if (state.weMuted) applyMute(video, false);
-      return;
-    }
-
-    var t = playbackMs(video);
-    applyMute(video, inMuteRange(t, state.mutes));
   }
 
   function hookHistory() {
     var fire = function () {
       state.detailsMountedFor = null;
+      state.osdBtn = null;
+      closeOsdPopover();
       setTimeout(function () {
         mountDetailsPanel();
+        mountOsdButton();
         tick();
-      }, 50);
+      }, 100);
     };
-    var wrap = function (fn) {
-      return function () {
-        var ret = fn.apply(this, arguments);
+    try {
+      var origPush = history.pushState.bind(history);
+      var origReplace = history.replaceState.bind(history);
+      history.pushState = function () {
+        var ret = origPush.apply(history, arguments);
         fire();
         return ret;
       };
-    };
-    history.pushState = wrap(history.pushState);
-    history.replaceState = wrap(history.replaceState);
-    window.addEventListener("popstate", fire);
-    window.addEventListener("hashchange", fire);
+      history.replaceState = function () {
+        var ret = origReplace.apply(history, arguments);
+        fire();
+        return ret;
+      };
+      window.addEventListener("popstate", fire);
+      window.addEventListener("hashchange", fire);
+    } catch (err) {
+      log("hookHistory error", err);
+    }
   }
 
   function hookPlaybackEvents() {
@@ -748,37 +761,56 @@
       if (Events && pm && typeof Events.on === "function") {
         Events.on(pm, "playbackstart", function () {
           state.itemId = null;
-          tick();
+          state.osdBtn = null;
+          setTimeout(function () {
+            mountOsdButton();
+            tick();
+          }, 300);
         });
         Events.on(pm, "playbackstop", function () {
           closeOsdPopover();
           if (state.weMuted && state.video) applyMute(state.video, false);
+          state.osdBtn = null;
         });
         Events.on(pm, "playerchange", function () {
           state.itemId = null;
-          tick();
+          state.osdBtn = null;
+          setTimeout(mountOsdButton, 300);
         });
       }
     } catch (_) {}
   }
 
   function observeDom() {
+    var timer = null;
     var obs = new MutationObserver(function () {
-      mountDetailsPanel();
-      mountOsdButton();
+      if (state._mwfDomQuiet) return;
+      if (timer) clearTimeout(timer);
+      // Debounce heavily — continuous OSD rebuild loops hide the media bar.
+      timer = setTimeout(function () {
+        timer = null;
+        mountDetailsPanel();
+        mountOsdButton();
+      }, 400);
     });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
+    try {
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    } catch (_) {}
   }
 
   function init() {
-    loadProfiles();
-    hookHistory();
-    hookPlaybackEvents();
-    observeDom();
-    mountDetailsPanel();
-    setInterval(tick, POLL_MS);
-    tick();
-    log("client ready", FLAGS);
+    try {
+      loadProfiles();
+      hookHistory();
+      hookPlaybackEvents();
+      observeDom();
+      mountDetailsPanel();
+      setInterval(tick, POLL_MS);
+      tick();
+      log("client ready", FLAGS);
+    } catch (err) {
+      console.warn("[mwf-plugin] init failed", err);
+    }
   }
 
   if (document.readyState === "loading") {

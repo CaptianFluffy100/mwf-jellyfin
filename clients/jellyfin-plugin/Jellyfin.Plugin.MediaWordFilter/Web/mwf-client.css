@@ -48,9 +48,9 @@
 }
 
 .mwf-osd-popover {
-  position: absolute;
-  bottom: 3.25rem;
-  right: 0.5rem;
+  position: fixed;
+  bottom: 5.5rem;
+  right: 1rem;
   z-index: 10020;
   min-width: 14rem;
   padding: 0.75rem;
