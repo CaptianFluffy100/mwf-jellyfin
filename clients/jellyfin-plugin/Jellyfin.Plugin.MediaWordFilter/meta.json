@@ -5,9 +5,9 @@
   "overview": "Server-side Media Word Filter companion: details-page profile controls, playback OSD toggle, mute proxy, and next-episode prefetch.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.0.0",
-  "changelog": "Initial release for Jellyfin 10.11.x: details/OSD UI, mute/profile proxy, next-episode prefetch.",
+  "version": "1.0.1.0",
+  "changelog": "Fix File Transformation registration timing (startup task, same pattern as Jellyfin Enhanced).",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T00:00:00Z"
+  "timestamp": "2026-07-23T16:50:00Z"
 }
