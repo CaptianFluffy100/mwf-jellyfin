@@ -1,21 +1,14 @@
 # Media Word Filter — Jellyfin server plugin
 
-C# plugin for **Jellyfin 10.11.x** that brings Media Word Filter muting into **Jellyfin Web** without a browser extension:
+C# plugin for **Jellyfin 10.11.x**: Dashboard config and authenticated `/MediaWordFilter/…` proxy to your MWF service.
 
-- Details page (`#/details?id=…`): profile + filter on/off controls under the Audio selector
-- Playback OSD: button to change the same settings while watching
-- Auto-fetches mute ranges for the current item and **prefetches** the next episode
-- Admin configures the MWF base URL once; users never type an MWF URL (same-origin `/MediaWordFilter/…` proxy)
-
-JMP (`clients/jmp`) and the browser extension (`clients/jms`) remain for non-web clients.
+**1.0.7+ does not patch jellyfin-web.** Earlier builds registered File Transformation on `index.html`; a bad transform payload could return empty HTML and break details/player pages. Use JMP (`clients/jmp`) or the browser extension (`clients/jms`) for muting until a safe inject path exists.
 
 ## Requirements
 
 1. **Jellyfin Server 10.11.x** (plugin targets `net9.0` / Jellyfin ABI 10.11; built against **10.11.4**)
-2. **[File Transformation](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation)**  
-   Repository: `https://www.iamparadox.dev/jellyfin/plugins/manifest.json`  
-   Without FT, the injected client script will not load (Dashboard config still works).
-3. A reachable **Media Word Filter** HTTP service (e.g. `http://mwf:8787` on Docker)
+2. A reachable **Media Word Filter** HTTP service (e.g. `http://mwf:8787` on Docker)
+3. File Transformation is **not** required for 1.0.7+
 
 ## Packaging files Jellyfin expects
 
@@ -54,16 +47,14 @@ dotnet build Jellyfin.Plugin.MediaWordFilter/Jellyfin.Plugin.MediaWordFilter.csp
 2. Set `versions[0].sourceUrl` in [`manifest.json`](manifest.json) to that zip URL (checksum already set by `build.sh`).
 3. Host `manifest.json` and add its URL in Jellyfin → Dashboard → Plugins → **Repositories**.
 4. Catalog → install **Media Word Filter**.
-5. Also install **File Transformation** (repo: `https://www.iamparadox.dev/jellyfin/plugins/manifest.json`).
 
 ### Manual (DLL / zip)
 
-1. Install **File Transformation**, then restart Jellyfin if prompted.
-2. Unzip `dist/jellyfin-plugin-mediawordfilter_*.zip` into a plugin folder, e.g.:
+1. Unzip `dist/jellyfin-plugin-mediawordfilter_*.zip` into a plugin folder, e.g.:
    - Docker: `/config/plugins/MediaWordFilter/`
    - Linux: `/var/lib/jellyfin/plugins/MediaWordFilter/`
    (folder must contain `Jellyfin.Plugin.MediaWordFilter.dll` and `meta.json`)
-3. Restart Jellyfin.
+2. Restart Jellyfin.
 
 ### Configure
 
@@ -76,36 +67,24 @@ dotnet build Jellyfin.Plugin.MediaWordFilter/Jellyfin.Plugin.MediaWordFilter.csp
 ## How it works
 
 ```text
-Jellyfin Web  →  /MediaWordFilter/ClientScript   (injected via File Transformation)
-              →  /MediaWordFilter/mutes/{id}     (auth)  →  MWF GET /mutes/{id}
-              →  /MediaWordFilter/profiles       (auth)  →  MWF GET /api/profiles
+Dashboard / clients  →  /MediaWordFilter/mutes/{id}  (auth)  →  MWF GET /mutes/{id}
+                     →  /MediaWordFilter/profiles    (auth)  →  MWF GET /api/profiles
+                     →  /MediaWordFilter/health               →  MWF health
+Embedded ClientScript/CSS endpoints remain for a future safe inject; they are not auto-loaded in 1.0.7+.
 ```
-
-Mute application matches JMS: poll HTML5 `video.muted` on half-open intervals `[start_ms, end_ms)`. Item ids are Jellyfin **item `Id`** values only (never `MediaSourceId`).
-
-Per-browser settings (localStorage):
-
-| Key | Meaning |
-|-----|---------|
-| `mwfFilterEnabled` | Filter master switch (default on) |
-| `mwfProfileUserId` | Optional MWF profile / user id override (empty = current Jellyfin user) |
 
 ## Manual test checklist
 
-1. Process a movie in MWF so mute ranges exist for your Jellyfin user.
-2. Plugin Dashboard **Test** succeeds.
-3. Open that item’s details page → MWF panel appears under Audio → profiles load.
-4. Play the item → audio mutes on known intervals (no extension installed).
-5. OSD button → turn filter **off** → muting stops; **on** → resumes.
-6. Play a TV episode that has a next episode with mute data → Network tab shows mute fetch for current and prefetch for next; starting the next episode uses cache quickly.
-7. Confirm JMP / JMS still work independently.
+1. Plugin Dashboard **Test** succeeds against your MWF base URL.
+2. Authenticated `GET /MediaWordFilter/mutes/{itemId}` returns mute data.
+3. Details page and player load normally (no blank UI).
+4. Muting via JMP / JMS still works independently.
 
 ## Limitations
 
-- **Jellyfin Web only** — Android TV, Swiftfin, Infuse, JMP need their own clients.
-- Cast / remote players without a local `<video>` element are not supported.
-- Details/OSD DOM hooks can drift across jellyfin-web versions; soft-fail if selectors change.
-- Official Jellyfin has no supported web UI injection API; File Transformation is required.
+- **No jellyfin-web UI injection in 1.0.7+** — use JMP or JMS for mute until a safe File Transformation path is restored.
+- Cast / remote players without a local `<video>` element are not supported by the JS mute clients.
+- Official Jellyfin has no supported web UI injection API.
 
 ## Layout
 

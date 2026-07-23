@@ -1,13 +1,13 @@
 {
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
-  "description": "Mutes filtered phrases during Jellyfin Web playback using Media Word Filter mute data. Requires the File Transformation plugin for client script injection.",
-  "overview": "Server-side Media Word Filter companion: details-page profile controls, mute proxy, and next-episode prefetch. Does not modify the playback media bar.",
+  "description": "Media Word Filter companion for Jellyfin. Dashboard config and mute/profile proxy APIs. Does not patch jellyfin-web.",
+  "overview": "Admin config + /MediaWordFilter proxy. Does not register File Transformation on index.html (that was blanking the web UI).",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.5.0",
-  "changelog": "Remove all playback media-bar / OSD injection so the player controls work normally again.",
+  "version": "1.0.7.0",
+  "changelog": "Stop registering File Transformation for index.html. Prior build could return empty HTML and blank details/player pages.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T18:00:00Z"
+  "timestamp": "2026-07-23T22:10:00Z"
 }
