@@ -11,7 +11,7 @@
         "version": "1.0.0.0",
         "changelog": "Initial release for Jellyfin 10.11.x: details/OSD UI, mute/profile proxy, next-episode prefetch.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha/jellyfin-plugin-mediawordfilter_1.0.0.0.zip",
         "checksum": "2214f10e614bebdb29de94ef25722b0e",
         "timestamp": "2026-07-23T00:00:00Z"
       }
