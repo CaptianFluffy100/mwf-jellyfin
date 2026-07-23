@@ -11,7 +11,7 @@
         "version": "1.0.1.0",
         "changelog": "Fix File Transformation registration timing via deferred startup task (same pattern as Jellyfin Enhanced).",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpah-2/jellyfin-plugin-mediawordfilter_1.0.1.0.zip",
         "checksum": "788651dff1c506a5b545b549f37c0641",
         "timestamp": "2026-07-23T16:50:00Z"
       }
