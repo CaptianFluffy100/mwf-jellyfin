@@ -1,19 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Media Word Filter</title>
     <style>
-        .mwf-config { max-width: 42rem; }
-        .mwf-config .inputContainer { margin-bottom: 1.25rem; }
-        .mwf-config label { display: block; margin-bottom: 0.35rem; font-weight: 600; }
-        .mwf-config .fieldDescription { opacity: 0.75; font-size: 0.9em; margin-top: 0.35rem; }
-        .mwf-config input[type="text"],
-        .mwf-config input[type="number"] {
-            width: 100%;
-            max-width: 36rem;
-            box-sizing: border-box;
-            padding: 0.45rem 0.6rem;
-        }
+        .mwf-config .fieldDescription { opacity: 0.75; margin-top: 0.35rem; }
         .mwf-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
         #mwf-test-result { margin-top: 0.75rem; white-space: pre-wrap; }
         .mwf-ok { color: #3dd68c; }
@@ -21,10 +12,10 @@
     </style>
 </head>
 <body>
-    <div id="mwfConfigPage" data-role="page" class="page type-interior pluginConfigurationPage mwf-config" data-require="emby-input,emby-button,emby-checkbox">
+    <div id="MediaWordFilterConfigPage" data-role="page" class="page type-interior pluginConfigurationPage mwf-config" data-require="emby-input,emby-button,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
-                <form id="mwfConfigForm">
+                <form id="MediaWordFilterConfigForm">
                     <div class="sectionTitleContainer">
                         <h2 class="sectionTitle">Media Word Filter</h2>
                     </div>
@@ -35,40 +26,40 @@
                     </p>
 
                     <div class="inputContainer">
-                        <label for="mwfBaseUrl">MWF base URL</label>
+                        <label class="inputLabel inputLabelUnfocused" for="mwfBaseUrl">MWF base URL</label>
                         <input is="emby-input" type="text" id="mwfBaseUrl" name="mwfBaseUrl" />
                         <div class="fieldDescription">Example: <code>http://mwf:8787</code> or <code>http://192.168.1.10:8787</code></div>
                     </div>
 
                     <div class="inputContainer">
-                        <label for="mwfTimeout">Request timeout (seconds)</label>
+                        <label class="inputLabel inputLabelUnfocused" for="mwfTimeout">Request timeout (seconds)</label>
                         <input is="emby-input" type="number" id="mwfTimeout" name="mwfTimeout" min="1" max="120" />
                     </div>
 
                     <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label>
+                        <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="mwfDetailsUi" />
                             <span>Enable details-page profile / filter controls</span>
                         </label>
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label>
+                        <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="mwfOsdUi" />
                             <span>Enable playback OSD settings button</span>
                         </label>
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label>
+                        <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="mwfPrefetch" />
                             <span>Prefetch mute data for the next episode</span>
                         </label>
                     </div>
 
                     <div class="mwf-actions">
-                        <button is="emby-button" type="submit" class="raised button-submit block">
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
                         </button>
-                        <button is="emby-button" type="button" class="raised block" id="mwfTestBtn">
+                        <button is="emby-button" type="button" class="raised block emby-button" id="mwfTestBtn">
                             <span>Test MWF connection</span>
                         </button>
                     </div>
@@ -76,80 +67,78 @@
                 </form>
             </div>
         </div>
-    </div>
-    <script>
-        (function () {
-            var pluginId = "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34";
+        <script type="text/javascript">
+            var MediaWordFilterConfig = {
+                pluginUniqueId: 'a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34'
+            };
 
-            function getPage() {
-                return document.getElementById("mwfConfigPage") || document.querySelector(".mwf-config");
+            function mwfRead(config, pascal, camel, fallback) {
+                if (config[pascal] !== undefined && config[pascal] !== null) return config[pascal];
+                if (config[camel] !== undefined && config[camel] !== null) return config[camel];
+                return fallback;
             }
 
-            function load(page, config) {
-                page.querySelector("#mwfBaseUrl").value = config.MwfBaseUrl || "";
-                page.querySelector("#mwfTimeout").value = config.RequestTimeoutSeconds != null ? config.RequestTimeoutSeconds : 10;
-                page.querySelector("#mwfDetailsUi").checked = config.EnableDetailsUi !== false;
-                page.querySelector("#mwfOsdUi").checked = config.EnableOsdUi !== false;
-                page.querySelector("#mwfPrefetch").checked = config.EnablePrefetch !== false;
+            function mwfWrite(config, pascal, camel, value) {
+                config[pascal] = value;
+                config[camel] = value;
             }
 
-            function save(page) {
-                return {
-                    MwfBaseUrl: (page.querySelector("#mwfBaseUrl").value || "").trim(),
-                    RequestTimeoutSeconds: parseInt(page.querySelector("#mwfTimeout").value, 10) || 10,
-                    EnableDetailsUi: !!page.querySelector("#mwfDetailsUi").checked,
-                    EnableOsdUi: !!page.querySelector("#mwfOsdUi").checked,
-                    EnablePrefetch: !!page.querySelector("#mwfPrefetch").checked
-                };
-            }
-
-            function onInit() {
-                var page = getPage();
-                if (!page || page.dataset.mwfBound === "1") return;
-                page.dataset.mwfBound = "1";
-
-                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                    load(page, config || {});
-                });
-
-                page.querySelector("#mwfConfigForm").addEventListener("submit", function (e) {
-                    e.preventDefault();
-                    var cfg = save(page);
-                    ApiClient.updatePluginConfiguration(pluginId, cfg).then(function () {
-                        Dashboard.processPluginConfigurationUpdateResult();
+            document.querySelector('#MediaWordFilterConfigPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(MediaWordFilterConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#mwfBaseUrl').value = mwfRead(config, 'MwfBaseUrl', 'mwfBaseUrl', '') || '';
+                        document.querySelector('#mwfTimeout').value = mwfRead(config, 'RequestTimeoutSeconds', 'requestTimeoutSeconds', 10);
+                        document.querySelector('#mwfDetailsUi').checked = mwfRead(config, 'EnableDetailsUi', 'enableDetailsUi', true) !== false;
+                        document.querySelector('#mwfOsdUi').checked = mwfRead(config, 'EnableOsdUi', 'enableOsdUi', true) !== false;
+                        document.querySelector('#mwfPrefetch').checked = mwfRead(config, 'EnablePrefetch', 'enablePrefetch', true) !== false;
+                        Dashboard.hideLoadingMsg();
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
                     });
                 });
 
-                page.querySelector("#mwfTestBtn").addEventListener("click", function () {
-                    var el = page.querySelector("#mwf-test-result");
-                    el.className = "";
-                    el.textContent = "Testing…";
-                    var url = ApiClient.getUrl("MediaWordFilter/health");
-                    ApiClient.ajax({ type: "GET", url: url, dataType: "json" })
+            document.querySelector('#MediaWordFilterConfigForm')
+                .addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(MediaWordFilterConfig.pluginUniqueId).then(function (config) {
+                        mwfWrite(config, 'MwfBaseUrl', 'mwfBaseUrl', (document.querySelector('#mwfBaseUrl').value || '').trim());
+                        mwfWrite(config, 'RequestTimeoutSeconds', 'requestTimeoutSeconds', parseInt(document.querySelector('#mwfTimeout').value, 10) || 10);
+                        mwfWrite(config, 'EnableDetailsUi', 'enableDetailsUi', !!document.querySelector('#mwfDetailsUi').checked);
+                        mwfWrite(config, 'EnableOsdUi', 'enableOsdUi', !!document.querySelector('#mwfOsdUi').checked);
+                        mwfWrite(config, 'EnablePrefetch', 'enablePrefetch', !!document.querySelector('#mwfPrefetch').checked);
+
+                        return ApiClient.updatePluginConfiguration(MediaWordFilterConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    }).catch(function (err) {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert({
+                            title: 'Save failed',
+                            message: (err && err.statusText) ? err.statusText : String(err || 'Unknown error')
+                        });
+                    });
+                    return false;
+                });
+
+            document.querySelector('#mwfTestBtn')
+                .addEventListener('click', function () {
+                    var el = document.querySelector('#mwf-test-result');
+                    el.className = '';
+                    el.textContent = 'Testing…';
+                    var url = ApiClient.getUrl('MediaWordFilter/health');
+                    ApiClient.ajax({ type: 'GET', url: url, dataType: 'json' })
                         .then(function (data) {
-                            el.className = "mwf-ok";
-                            el.textContent = "OK: " + JSON.stringify(data);
+                            el.className = 'mwf-ok';
+                            el.textContent = 'OK: ' + JSON.stringify(data);
                         })
                         .catch(function (err) {
-                            el.className = "mwf-err";
-                            el.textContent = "Failed: " + (err && err.statusText ? err.statusText : String(err));
+                            el.className = 'mwf-err';
+                            el.textContent = 'Failed: ' + ((err && err.statusText) ? err.statusText : String(err));
                         });
                 });
-            }
-
-            // Jellyfin dashboard page lifecycle
-            document.addEventListener("viewshow", function (e) {
-                if (e && e.target && e.target.classList && e.target.classList.contains("pluginConfigurationPage")) {
-                    onInit();
-                }
-            });
-            // Fallback for direct load
-            if (document.readyState === "loading") {
-                document.addEventListener("DOMContentLoaded", onInit);
-            } else {
-                setTimeout(onInit, 0);
-            }
-        })();
-    </script>
+        </script>
+    </div>
 </body>
 </html>

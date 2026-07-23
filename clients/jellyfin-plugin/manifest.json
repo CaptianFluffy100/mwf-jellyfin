@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.3.0",
+        "changelog": "Fix Dashboard settings save (pageshow + merge into existing plugin configuration).",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpah-4/jellyfin-plugin-mediawordfilter_1.0.3.0.zip",
+        "checksum": "a8784f5517da7bd46641965c31d59f9c",
+        "timestamp": "2026-07-23T17:25:00Z"
+      },
+      {
         "version": "1.0.2.0",
         "changelog": "Pass Newtonsoft JObject to File Transformation RegisterTransformation (matches Jellyfin Enhanced).",
         "targetAbi": "10.11.0.0",
