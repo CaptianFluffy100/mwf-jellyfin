@@ -32,10 +32,16 @@
   var TRUSTED_PATTERNS = [
     { re: new RegExp("[?&#]ItemId=(" + GUID_DASHED + ")", "i") },
     { re: new RegExp("[?&#]ItemId=(" + GUID_FLAT + ")", "i") },
+    { re: new RegExp("[?&#]itemId=(" + GUID_DASHED + ")", "i") },
+    { re: new RegExp("[?&#]itemId=(" + GUID_FLAT + ")", "i") },
+    { re: new RegExp("[?&#]item_id=(" + GUID_DASHED + ")", "i") },
+    { re: new RegExp("[?&#]item_id=(" + GUID_FLAT + ")", "i") },
     { re: new RegExp("/Items/(" + GUID_DASHED + ")", "i") },
     { re: new RegExp("/Items/(" + GUID_FLAT + ")", "i") },
     { re: new RegExp("/Videos/(" + GUID_DASHED + ")", "i") },
     { re: new RegExp("/Videos/(" + GUID_FLAT + ")", "i") },
+    { re: new RegExp("/Audio/(" + GUID_DASHED + ")", "i") },
+    { re: new RegExp("/Audio/(" + GUID_FLAT + ")", "i") },
     {
       re: new RegExp(
         "#/(?:details|item|video|movies|tv)[^#]*[?&]id=(" + GUID_DASHED + ")",
@@ -56,6 +62,7 @@
     profiles: [],
     profilesLoaded: false,
     itemId: null,
+    itemIdSource: null,
     mutes: [],
     muteKey: null,
     weMuted: false,
@@ -168,7 +175,17 @@
   }
 
   function apiClient() {
-    return window.ApiClient || null;
+    if (window.ApiClient) return window.ApiClient;
+    if (window.jellyfin && window.jellyfin.ApiClient) return window.jellyfin.ApiClient;
+    return null;
+  }
+
+  function playbackManager() {
+    if (window.PlaybackManager) return window.PlaybackManager;
+    if (window.jellyfin && window.jellyfin.PlaybackManager) {
+      return window.jellyfin.PlaybackManager;
+    }
+    return null;
   }
 
   function authHeaders() {
@@ -240,49 +257,151 @@
     return state.profileUserId || currentUserId() || "";
   }
 
-  function playbackItemId() {
+  function pmCurrentItem() {
+    var pm = playbackManager();
+    if (!pm) return null;
     try {
-      var pm = window.PlaybackManager;
-      if (pm) {
-        if (typeof pm.getCurrentPlayer === "function") {
-          var player = pm.getCurrentPlayer();
-          if (player) {
-            if (player._currentItem && player._currentItem.Id) {
-              var a = normalizeItemId(player._currentItem.Id);
-              if (a) return a;
-            }
-            if (typeof player.getCurrentItem === "function") {
-              var it = player.getCurrentItem();
-              if (it && it.Id) {
-                var b = normalizeItemId(it.Id);
-                if (b) return b;
-              }
+      if (typeof pm.currentItem === "function") return pm.currentItem();
+      if (typeof pm.getCurrentItem === "function") return pm.getCurrentItem();
+      if (typeof pm.getCurrentlyPlayingItem === "function") {
+        return pm.getCurrentlyPlayingItem();
+      }
+      if (pm._currentItem) return pm._currentItem;
+      if (pm.currentItem) return pm.currentItem;
+    } catch (_) {}
+    return null;
+  }
+
+  function pmItemIdFromPlayerState() {
+    var pm = playbackManager();
+    if (!pm) return null;
+    try {
+      var st =
+        typeof pm.getPlayerState === "function"
+          ? pm.getPlayerState()
+          : typeof pm.getCurrentPlayerState === "function"
+            ? pm.getCurrentPlayerState()
+            : null;
+      var now = st && (st.NowPlayingItem || st.nowPlayingItem);
+      if (now && now.Id) return normalizeItemId(now.Id);
+    } catch (_) {}
+    return null;
+  }
+
+  /**
+   * Resolve Jellyfin item Id (never MediaSourceId). Sticky while a video element exists.
+   */
+  function resolvePlaybackItemId(video) {
+    var item = pmCurrentItem();
+    if (item && item.Id) {
+      var fromPm = normalizeItemId(item.Id);
+      if (fromPm) return { id: fromPm, source: "PlaybackManager.currentItem" };
+    }
+
+    var fromState = pmItemIdFromPlayerState();
+    if (fromState) return { id: fromState, source: "PlaybackManager.playerState" };
+
+    try {
+      var pm = playbackManager();
+      if (pm && typeof pm.getCurrentPlayer === "function") {
+        var player = pm.getCurrentPlayer();
+        if (player) {
+          if (player._currentItem && player._currentItem.Id) {
+            var fromPlayer = normalizeItemId(player._currentItem.Id);
+            if (fromPlayer) return { id: fromPlayer, source: "player._currentItem" };
+          }
+          if (typeof player.getCurrentItem === "function") {
+            var pit = player.getCurrentItem();
+            if (pit && pit.Id) {
+              var fromGet = normalizeItemId(pit.Id);
+              if (fromGet) return { id: fromGet, source: "player.getCurrentItem" };
             }
           }
-        }
-        if (typeof pm.currentItem === "function") {
-          var cur = pm.currentItem();
-          if (cur && cur.Id) {
-            var c = normalizeItemId(cur.Id);
-            if (c) return c;
-          }
-        }
-        if (pm._currentItem && pm._currentItem.Id) {
-          var d = normalizeItemId(pm._currentItem.Id);
-          if (d) return d;
         }
       }
     } catch (_) {}
 
     try {
-      var c2 = apiClient();
-      if (c2 && typeof c2.getCurrentItemId === "function") {
-        var e = normalizeItemId(c2.getCurrentItemId());
-        if (e) return e;
+      var c = apiClient();
+      if (c && typeof c.getCurrentItemId === "function") {
+        var fromApi = normalizeItemId(c.getCurrentItemId());
+        if (fromApi) return { id: fromApi, source: "ApiClient.getCurrentItemId" };
       }
     } catch (_) {}
 
-    return extractFromString(location.href) || extractFromString(location.hash);
+    if (video && state.itemId) {
+      return { id: state.itemId, source: state.itemIdSource || "sticky" };
+    }
+
+    if (video && video.src) {
+      var fromSrc = extractFromString(video.src);
+      if (fromSrc) return { id: fromSrc, source: "video.src" };
+    }
+    if (video && video.currentSrc) {
+      var fromCurrentSrc = extractFromString(video.currentSrc);
+      if (fromCurrentSrc) return { id: fromCurrentSrc, source: "video.currentSrc" };
+    }
+
+    var fromHash = extractFromString(location.hash);
+    if (fromHash) return { id: fromHash, source: "hash" };
+    var fromHref = extractFromString(location.href);
+    if (fromHref) return { id: fromHref, source: "href" };
+
+    return null;
+  }
+
+  function refreshPlaybackItem(video, force) {
+    var prevVideo = state.video;
+
+    if (prevVideo && !video) {
+      if (state.weMuted) applyMute(prevVideo, false);
+      state.video = null;
+      state.itemId = null;
+      state.itemIdSource = null;
+      state.mutes = [];
+      state.muteKey = null;
+      return;
+    }
+
+    if (video) state.video = video;
+
+    var resolved = resolvePlaybackItemId(video);
+    var newId = resolved ? resolved.id : null;
+    var newSource = resolved ? resolved.source : null;
+
+    if (!force && newId && newId === state.itemId) {
+      if (newSource && newSource !== "sticky") state.itemIdSource = newSource;
+      return;
+    }
+
+    if (!force && !newId && video && state.itemId) {
+      return;
+    }
+
+    if (!force && !newId && !video) {
+      if (state.itemId) {
+        state.itemId = null;
+        state.itemIdSource = null;
+        state.mutes = [];
+        state.muteKey = null;
+      }
+      return;
+    }
+
+    if (newId !== state.itemId) {
+      if (state.weMuted && video) applyMute(video, false);
+      state.itemId = newId;
+      state.itemIdSource = newSource;
+      state.muteKey = null;
+      if (newId) {
+        log("item id", newId, "via", newSource);
+        ensureMutes(newId, false).then(function () {
+          prefetchNextEpisode(newId);
+        });
+      } else {
+        state.mutes = [];
+      }
+    }
   }
 
   function findVideo() {
@@ -492,7 +611,13 @@
         chk.checked = !!state.enabled;
       });
 
-      if (itemId) ensureMutes(itemId, false);
+      if (itemId) {
+        if (itemId !== state.itemId) {
+          state.itemId = itemId;
+          state.itemIdSource = "details";
+        }
+        ensureMutes(itemId, false);
+      }
     } catch (err) {
       log("mountDetailsPanel error", err);
     }
@@ -542,7 +667,10 @@
   }
 
   function applyMute(video, shouldMute) {
-    if (!video) return;
+    if (!video) {
+      if (!shouldMute) state.weMuted = false;
+      return;
+    }
     if (shouldMute) {
       if (!state.weMuted) {
         state.userWasMuted = !!video.muted;
@@ -555,26 +683,17 @@
     }
   }
 
-  function tick() {
+  function tick(forceRefresh) {
     try {
       var video = findVideo();
-      state.video = video;
+      refreshPlaybackItem(video, !!forceRefresh);
 
-      var itemId = playbackItemId();
-      if (itemId !== state.itemId) {
-        state.itemId = itemId;
-        state.muteKey = null;
-        if (state.weMuted && video) applyMute(video, false);
-        if (itemId) {
-          ensureMutes(itemId, false).then(function () {
-            prefetchNextEpisode(itemId);
-          });
-        } else {
-          state.mutes = [];
-        }
+      if (!state.enabled) {
+        if (state.weMuted) applyMute(video, false);
+        return;
       }
 
-      if (!video || !state.enabled || !state.mutes || !state.mutes.length) {
+      if (!video || !state.mutes || !state.mutes.length) {
         if (state.weMuted) applyMute(video, false);
         return;
       }
@@ -606,31 +725,37 @@
   function hookPlaybackEvents() {
     try {
       var Events = window.Events;
-      var pm = window.PlaybackManager;
+      var pm = playbackManager();
       if (Events && pm && typeof Events.on === "function") {
         Events.on(pm, "playbackstart", function () {
-          state.itemId = null;
-          tick();
+          tick(true);
         });
         Events.on(pm, "playbackstop", function () {
           if (state.weMuted && state.video) applyMute(state.video, false);
+          state.itemId = null;
+          state.itemIdSource = null;
+          state.mutes = [];
+          state.muteKey = null;
         });
         Events.on(pm, "playerchange", function () {
-          state.itemId = null;
-          tick();
+          tick(true);
         });
       }
     } catch (_) {}
   }
 
   function observeDom() {
-    var timer = null;
+    var detailsTimer = null;
     try {
       var obs = new MutationObserver(function () {
+        var video = findVideo();
+        if (video !== state.video) {
+          tick(true);
+        }
         if (!isDetailsHash()) return;
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(function () {
-          timer = null;
+        if (detailsTimer) clearTimeout(detailsTimer);
+        detailsTimer = setTimeout(function () {
+          detailsTimer = null;
           mountDetailsPanel();
         }, 400);
       });

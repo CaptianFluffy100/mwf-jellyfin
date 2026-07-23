@@ -2,7 +2,7 @@
 
 C# plugin for **Jellyfin 10.11.x**: Dashboard config, authenticated `/MediaWordFilter/…` proxy to your MWF service, and details-page UI in Jellyfin Web (profile + filter toggle under Audio).
 
-**1.0.8** restores safe File Transformation inject for the details-page UI. Playback OSD / media-bar injection remains disabled.
+**1.0.9** fixes playback muting: sticky item id while video plays, expanded PlaybackManager resolution, and stream URL fallback (aligned with the JMS browser extension). Details-page UI unchanged; playback OSD injection remains disabled.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ chmod +x build.sh
 
 Produces:
 
-- `dist/jellyfin-plugin-mediawordfilter_1.0.8.0.zip` (DLL + `meta.json`)
+- `dist/jellyfin-plugin-mediawordfilter_1.0.9.0.zip` (DLL + `meta.json`)
 - Updated `manifest.json` checksum
 
 Or with a local SDK:
@@ -46,7 +46,7 @@ dotnet build Jellyfin.Plugin.MediaWordFilter/Jellyfin.Plugin.MediaWordFilter.csp
 1. Host `dist/jellyfin-plugin-mediawordfilter_*.zip` somewhere Jellyfin can download (HTTPS).
 2. Set `versions[0].sourceUrl` in [`manifest.json`](manifest.json) to that zip URL (checksum already set by `build.sh`).
 3. Host `manifest.json` and add its URL in Jellyfin → Dashboard → Plugins → **Repositories**.
-4. Catalog → install **Media Word Filter** (1.0.8+).
+4. Catalog → install **Media Word Filter** (1.0.9+).
 
 ### Manual (DLL / zip)
 
