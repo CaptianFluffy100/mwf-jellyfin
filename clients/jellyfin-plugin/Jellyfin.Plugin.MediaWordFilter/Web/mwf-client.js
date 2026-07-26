@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.22.0";
+  var CLIENT_VERSION = "1.0.23.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -80,6 +80,8 @@
     viewFilter: { block: [], skip: [] },
     muteDoc: null,
     muteKey: null,
+    /** Item-scoped mute timing from MWF mute doc (ms). */
+    audioShiftMs: 0,
     weMuted: false,
     savedGain: 1,
     audioGraph: null,
@@ -140,8 +142,6 @@
       profanity1: true,
       profanity2: true,
       profanity3: true,
-      // Delay (+) or advance (−) mute timing vs the stream, in milliseconds.
-      audioShiftMs: 0,
       // matched label -> "skip" | "block" | "off"
       viewMatched: {}
     };
@@ -159,17 +159,12 @@
     if (p2 === undefined) p2 = parsed.Profanity2;
     var p3 = parsed.profanity3;
     if (p3 === undefined) p3 = parsed.Profanity3;
-    var shift = parsed.audioShiftMs;
-    if (shift === undefined) shift = parsed.AudioShiftMs;
     var vm = parsed.viewMatched;
     if (vm === undefined) vm = parsed.ViewMatched;
     d.blasphemy = blasphemy !== false;
     d.profanity1 = p1 !== false;
     d.profanity2 = p2 !== false;
     d.profanity3 = p3 !== false;
-    var n = Number(shift);
-    if (!Number.isFinite(n)) n = 0;
-    d.audioShiftMs = Math.max(-10000, Math.min(10000, Math.round(n)));
     d.viewMatched = vm && typeof vm === "object" ? vm : {};
     return d;
   }
@@ -198,7 +193,6 @@
       profanity1: state.prefs.profanity1 !== false,
       profanity2: state.prefs.profanity2 !== false,
       profanity3: state.prefs.profanity3 !== false,
-      audioShiftMs: Number(state.prefs.audioShiftMs) || 0,
       viewMatched: state.prefs.viewMatched || {}
     };
   }
@@ -450,10 +444,19 @@
     return Object.keys(set).sort();
   }
 
+  function parseAudioShiftMs(doc) {
+    if (!doc) return 0;
+    var n = Number(doc.audio_shift_ms);
+    if (!Number.isFinite(n)) n = Number(doc.audioShiftMs);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(-10000, Math.min(10000, Math.round(n)));
+  }
+
   function rebuildFromCachedDoc() {
     if (!state.muteDoc) {
       state.mutes = [];
       state.viewFilter = { block: [], skip: [] };
+      state.audioShiftMs = 0;
       hideBlockOverlay();
       return;
     }
@@ -466,6 +469,7 @@
     }
     state.mutes = parseMuteDocument(state.muteDoc, state.prefs);
     state.viewFilter = parseViewFilter(state.muteDoc);
+    state.audioShiftMs = parseAudioShiftMs(state.muteDoc);
   }
 
   function applyDocToState(doc, itemId) {
@@ -912,10 +916,6 @@
       document.querySelectorAll("input.mwf-pref-p3").forEach(function (el) {
         el.checked = p.profanity3 !== false;
       });
-      document.querySelectorAll("input.mwf-audio-shift").forEach(function (el) {
-        var v = Number(p.audioShiftMs) || 0;
-        if (String(el.value) !== String(v)) el.value = String(v);
-      });
       syncViewSelectValues();
       refreshDetailsSummary();
     } catch (_) {}
@@ -1294,15 +1294,9 @@
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p2" /> Moderate</label>' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p3" /> Strong</label>' +
         "</div>" +
-        '<div class="mwf-row mwf-shift-row">' +
-        '<label class="mwf-shift-label">Audio shift (ms) ' +
-        '<input type="number" class="mwf-audio-shift" step="10" min="-10000" max="10000" />' +
-        "</label>" +
-        "</div>" +
-        '<p class="mwf-hint mwf-shift-hint">Positive delays mutes; negative advances them (line up with the stream).</p>' +
         '<p class="mwf-sublabel">Scenes (skip / block)</p>' +
         '<div class="mwf-view-list"></div>' +
-        '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account. Mild / Moderate / Strong are profanity levels. Skip jumps the span; Block covers with boxes.</p>' +
+        '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account. Mild / Moderate / Strong are profanity levels. Skip jumps the span; Block covers with boxes. Audio shift is set per title in Media Word Filter.</p>' +
         "</div>";
 
       var mountParent =
@@ -1331,11 +1325,6 @@
       });
       panel.querySelector(".mwf-pref-p3").addEventListener("change", function (e) {
         writePrefs({ profanity3: e.target.checked });
-      });
-      panel.querySelector(".mwf-audio-shift").addEventListener("change", function (e) {
-        var n = Number(e.target.value);
-        if (!Number.isFinite(n)) n = 0;
-        writePrefs({ audioShiftMs: n });
       });
 
       state.detailsMountedFor = itemId;
@@ -1979,7 +1968,7 @@
 
       var tMs = playbackMs(video);
       var hasAudio = state.mutes && state.mutes.length;
-      var audioShift = Number(state.prefs && state.prefs.audioShiftMs) || 0;
+      var audioShift = Number(state.audioShiftMs) || 0;
       applyMute(
         video,
         !!(hasAudio && inMuteRange(tMs - audioShift, state.mutes))

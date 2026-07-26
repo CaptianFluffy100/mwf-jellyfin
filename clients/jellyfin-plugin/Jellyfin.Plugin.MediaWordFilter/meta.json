@@ -2,12 +2,12 @@
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
   "description": "Media Word Filter companion for Jellyfin Web. mute.v2 audio tiers + view skip/block with details-page prefs.",
-  "overview": "Content counts in summary; audio shift (ms); deduped scene counts.",
+  "overview": "Reads item audio_shift_ms from MWF mute API (set on MWF Edit filter shift page).",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.22.0",
-  "changelog": "Content Found shows block counts (and Off). Scene block+skip counted once. Audio shift (ms) pref to align mutes with the stream.",
+  "version": "1.0.23.0",
+  "changelog": "Audio shift moved to MWF per-title DB; plugin reads audio_shift_ms from mute API for all clients.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-26T20:00:00Z"
+  "timestamp": "2026-07-26T20:15:00Z"
 }

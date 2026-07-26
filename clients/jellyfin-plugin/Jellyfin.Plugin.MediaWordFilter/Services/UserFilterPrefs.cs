@@ -35,13 +35,6 @@ public sealed class UserFilterPrefs
     public bool Profanity3 { get; set; } = true;
 
     /// <summary>
-    /// Offset mute timing vs the stream (ms). Positive delays mutes; negative advances them.
-    /// </summary>
-    [JsonProperty("audioShiftMs")]
-    [JsonPropertyName("audioShiftMs")]
-    public int AudioShiftMs { get; set; }
-
-    /// <summary>
     /// Global scene actions by matched label: "skip" | "block".
     /// Missing / other = off.
     /// </summary>

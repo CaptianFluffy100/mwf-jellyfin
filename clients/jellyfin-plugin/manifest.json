@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.23.0",
+        "changelog": "Audio shift moved to MWF per-title DB; plugin reads audio_shift_ms from mute API for all clients.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-23/jellyfin-plugin-mediawordfilter_1.0.23.0.zip",
+        "checksum": "c5dd1c3831cdf8c893cb3c7c4ad99ac1",
+        "timestamp": "2026-07-26T20:15:00Z"
+      },
+      {
         "version": "1.0.22.0",
         "changelog": "Content Found shows block counts (and Off). Scene block+skip counted once. Audio shift (ms) pref to align mutes with the stream.",
         "targetAbi": "10.11.0.0",
