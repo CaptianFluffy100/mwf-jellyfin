@@ -1,6 +1,6 @@
 /**
  * Media Word Filter — Jellyfin Web client (server plugin).
- * Audio mute uses HTML5 video.muted (full mute, not volume ducking).
+ * Audio mute ducks HTML5 video.volume (not video.muted — that flashes Chromium's mute icon).
  * Details-page prefs control blasphemy / profanity tiers / view skip|block|off.
  * Does NOT touch the playback OSD / media bar.
  */
@@ -57,7 +57,10 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.13.0";
+  var CLIENT_VERSION = "1.0.15.0";
+  // Have enough buffered media before mute/skip/overlay touch the element.
+  var MIN_READY = 3; // HAVE_FUTURE_DATA
+  var SETTLE_MS = 500;
 
   var state = {
     enabled: readEnabled(),
@@ -70,6 +73,7 @@
     muteKey: null,
     weMuted: false,
     userWasMuted: false,
+    savedVolume: 1,
     video: null,
     cache: Object.create(null),
     fetchPending: Object.create(null),
@@ -79,7 +83,10 @@
     lastTickDiag: null,
     lastSkipId: null,
     overlayHost: null,
-    viewLabelsKey: ""
+    viewLabelsKey: "",
+    playbackSettled: false,
+    settleTimer: null,
+    hookedVideo: null
   };
 
   function log() {
@@ -288,13 +295,13 @@
     if (!state.muteDoc) {
       state.mutes = [];
       state.viewFilter = { block: [], skip: [] };
-      clearBlockOverlay();
+      hideBlockOverlay();
       return;
     }
     if (!state.enabled) {
       state.mutes = [];
       state.viewFilter = { block: [], skip: [] };
-      clearBlockOverlay();
+      hideBlockOverlay();
       if (state.weMuted) applyMute(state.video, false);
       return;
     }
@@ -601,6 +608,9 @@
       state.itemId = newId;
       state.itemIdSource = newSource;
       state.muteKey = null;
+      state.lastSkipId = null;
+      markPlaybackUnsettled();
+      hideBlockOverlay();
       if (newId) {
         log("item id", newId, "via", newSource);
         ensureMutes(newId, false).then(function () {
@@ -646,14 +656,14 @@
       state.viewFilter = { block: [], skip: [] };
       state.muteDoc = null;
       state.muteKey = null;
-      clearBlockOverlay();
+      hideBlockOverlay();
       return Promise.resolve([]);
     }
     if (!state.enabled) {
       state.mutes = [];
       state.viewFilter = { block: [], skip: [] };
       state.muteKey = cacheKey(itemId) + "|off";
-      clearBlockOverlay();
+      hideBlockOverlay();
       return Promise.resolve([]);
     }
 
@@ -946,14 +956,23 @@
       if (!shouldMute) state.weMuted = false;
       return;
     }
+    // Use volume ducking instead of video.muted. Toggling .muted makes Chromium
+    // flash its built-in HTML5 mute/volume icon over the player.
     if (shouldMute) {
       if (!state.weMuted) {
         state.userWasMuted = !!video.muted;
+        var vol = Number(video.volume);
+        state.savedVolume = Number.isFinite(vol) && vol > 0 ? vol : 1;
         state.weMuted = true;
       }
-      if (!video.muted) video.muted = true;
+      if (state.userWasMuted) return;
+      if (video.volume !== 0) video.volume = 0;
     } else if (state.weMuted) {
-      video.muted = !!state.userWasMuted;
+      if (!state.userWasMuted) {
+        var restore = Number(state.savedVolume);
+        if (!Number.isFinite(restore) || restore <= 0) restore = 1;
+        if (video.volume !== restore) video.volume = restore;
+      }
       state.weMuted = false;
     }
   }
@@ -1080,31 +1099,133 @@
     return { skip: skipScene, blocks: blockScenes };
   }
 
+  function markPlaybackUnsettled() {
+    state.playbackSettled = false;
+    if (state.settleTimer) {
+      clearTimeout(state.settleTimer);
+      state.settleTimer = null;
+    }
+  }
+
+  function schedulePlaybackSettle() {
+    if (state.settleTimer) clearTimeout(state.settleTimer);
+    state.settleTimer = setTimeout(function () {
+      state.settleTimer = null;
+      var video = state.video || findVideo();
+      if (
+        video &&
+        !video.paused &&
+        !video.seeking &&
+        video.readyState >= MIN_READY
+      ) {
+        state.playbackSettled = true;
+      }
+    }, SETTLE_MS);
+  }
+
+  function mediaIsPlayable(video) {
+    return !!(
+      video &&
+      video.readyState >= MIN_READY &&
+      !video.seeking &&
+      !video.ended
+    );
+  }
+
+  function hookVideoLifecycle(video) {
+    if (!video || video === state.hookedVideo) return;
+    unhookVideoLifecycle();
+    state.hookedVideo = video;
+    var onBusy = function () {
+      markPlaybackUnsettled();
+      clearBlockOverlay();
+    };
+    var onPlaying = function () {
+      schedulePlaybackSettle();
+    };
+    video.addEventListener("waiting", onBusy);
+    video.addEventListener("seeking", onBusy);
+    video.addEventListener("stalled", onBusy);
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("canplay", onPlaying);
+    state._videoLifecycle = { onBusy: onBusy, onPlaying: onPlaying };
+  }
+
+  function unhookVideoLifecycle() {
+    var video = state.hookedVideo;
+    var handlers = state._videoLifecycle;
+    if (video && handlers) {
+      try {
+        video.removeEventListener("waiting", handlers.onBusy);
+        video.removeEventListener("seeking", handlers.onBusy);
+        video.removeEventListener("stalled", handlers.onBusy);
+        video.removeEventListener("playing", handlers.onPlaying);
+        video.removeEventListener("canplay", handlers.onPlaying);
+      } catch (_) {}
+    }
+    state.hookedVideo = null;
+    state._videoLifecycle = null;
+    markPlaybackUnsettled();
+  }
+
+  function farthestSkipEnd(tMs, seed) {
+    if (!seed) return null;
+    var endMs = Number(seed.end_ms);
+    if (!Number.isFinite(endMs)) return seed;
+    var guard = 0;
+    var changed = true;
+    while (changed && guard++ < 32) {
+      changed = false;
+      var active = activeScenesAt(Math.max(tMs, endMs - 1));
+      for (var i = 0; i < active.skips.length; i++) {
+        var s = active.skips[i];
+        if (viewActionFor(s.matched || "") !== "skip") continue;
+        var sEnd = Number(s.end_ms);
+        if (!Number.isFinite(sEnd)) continue;
+        // Contiguous / overlapping skip windows — jump once past the chain.
+        if (s.start_ms <= endMs + 50 && sEnd > endMs) {
+          endMs = sEnd;
+          seed = s;
+          changed = true;
+        }
+      }
+    }
+    return { id: seed.id, matched: seed.matched, end_ms: endMs };
+  }
+
   function ensureOverlayHost(video) {
     if (!video) {
-      clearBlockOverlay();
+      hideBlockOverlay();
       return null;
     }
     // Never mutate Jellyfin video parent styles — that breaks playback UI.
     var host = state.overlayHost;
     if (!host || !host.isConnected) {
-      if (host && host.parentElement) {
-        try {
-          host.remove();
-        } catch (_) {}
-      }
       host = document.createElement("div");
       host.className = "mwf-block-overlay";
       host.setAttribute("aria-hidden", "true");
+      host.style.display = "none";
       document.body.appendChild(host);
       state.overlayHost = host;
     }
     var rect = video.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) {
+      hideBlockOverlay();
+      return null;
+    }
     host.style.left = rect.left + "px";
     host.style.top = rect.top + "px";
     host.style.width = rect.width + "px";
     host.style.height = rect.height + "px";
+    host.style.display = "block";
     return host;
+  }
+
+  function hideBlockOverlay() {
+    if (state.overlayHost) {
+      state.overlayHost.style.display = "none";
+      state.overlayHost.innerHTML = "";
+    }
   }
 
   function clearBlockOverlay() {
@@ -1118,10 +1239,10 @@
 
   function renderBlockOverlay(video, blockScenes, tMs) {
     if (!blockScenes || !blockScenes.length) {
-      clearBlockOverlay();
+      hideBlockOverlay();
       return;
     }
-    if (!video || video.readyState < 2 || video.seeking) {
+    if (!mediaIsPlayable(video) || !state.playbackSettled) {
       return;
     }
     var host = ensureOverlayHost(video);
@@ -1171,32 +1292,34 @@
 
   function applyViewFilter(video, tMs) {
     if (!video || !state.enabled) {
-      clearBlockOverlay();
+      hideBlockOverlay();
       state.lastSkipId = null;
       return;
     }
-    // Do not touch seeking/currentTime while the player is still loading.
-    if (video.readyState < 2) {
-      clearBlockOverlay();
+    // Never seek/overlay while the player is still buffering or settling.
+    if (!state.playbackSettled || !mediaIsPlayable(video) || video.paused) {
+      hideBlockOverlay();
       return;
     }
     var resolved = resolveViewActions(tMs);
     if (resolved.skip) {
+      var jump = farthestSkipEnd(tMs, resolved.skip);
       if (
-        state.lastSkipId !== resolved.skip.id &&
-        !video.seeking &&
-        !video.paused
+        jump &&
+        state.lastSkipId !== jump.id + ":" + jump.end_ms &&
+        !video.seeking
       ) {
-        state.lastSkipId = resolved.skip.id;
-        var endSec = Number(resolved.skip.end_ms) / 1000;
-        if (Number.isFinite(endSec) && endSec > video.currentTime + 0.05) {
-          log("skip to", endSec, resolved.skip.matched);
+        state.lastSkipId = jump.id + ":" + jump.end_ms;
+        var endSec = Number(jump.end_ms) / 1000;
+        if (Number.isFinite(endSec) && endSec > video.currentTime + 0.15) {
+          markPlaybackUnsettled();
+          log("skip to", endSec, jump.matched);
           try {
             video.currentTime = endSec;
           } catch (_) {}
         }
       }
-      clearBlockOverlay();
+      hideBlockOverlay();
       return;
     }
     state.lastSkipId = null;
@@ -1231,12 +1354,14 @@
   function tick(forceRefresh) {
     try {
       var video = findVideo();
-      state.video = video;
+      if (video !== state.hookedVideo) {
+        hookVideoLifecycle(video);
+      }
       refreshPlaybackItem(video, !!forceRefresh);
 
       if (!state.enabled) {
         if (state.weMuted) applyMute(video, false);
-        clearBlockOverlay();
+        hideBlockOverlay();
         state.lastSkipId = null;
         tickDiagnostics(video);
         return;
@@ -1248,13 +1373,13 @@
 
       if (!video) {
         if (state.weMuted) applyMute(null, false);
-        clearBlockOverlay();
+        hideBlockOverlay();
         tickDiagnostics(video);
         return;
       }
 
-      // Wait until media can play before muting/seeking — avoids stalling startup.
-      if (video.readyState < 2) {
+      // Wait until media has future data before muting — avoids stalling startup.
+      if (video.readyState < MIN_READY) {
         tickDiagnostics(video);
         return;
       }
@@ -1295,11 +1420,14 @@
       if (!Events || !pm || typeof Events.on !== "function") return false;
 
       Events.on(pm, "playbackstart", function () {
+        markPlaybackUnsettled();
+        schedulePlaybackSettle();
         tick(true);
       });
       Events.on(pm, "playbackstop", function () {
         if (state.weMuted && state.video) applyMute(state.video, false);
         clearBlockOverlay();
+        unhookVideoLifecycle();
         state.lastSkipId = null;
         if (!findVideo()) {
           state.video = null;
@@ -1312,6 +1440,7 @@
         }
       });
       Events.on(pm, "playerchange", function () {
+        markPlaybackUnsettled();
         tick(true);
       });
       state.playbackHooksAttached = true;
@@ -1335,11 +1464,9 @@
   function observeDom() {
     var detailsTimer = null;
     try {
+      // Only for details UI — never call tick() here. Jellyfin's player mutates
+      // the DOM heavily; observing + querying video on every mutation freezes startup.
       var obs = new MutationObserver(function () {
-        var video = findVideo();
-        if (video !== state.video) {
-          tick(true);
-        }
         if (!isDetailsHash()) return;
         if (detailsTimer) clearTimeout(detailsTimer);
         detailsTimer = setTimeout(function () {

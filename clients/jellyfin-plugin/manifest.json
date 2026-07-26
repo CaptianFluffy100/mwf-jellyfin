@@ -4,9 +4,25 @@
     "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
     "name": "Media Word Filter",
     "description": "Media Word Filter: mute.v2 + details prefs. No profiles.",
-    "overview": "Shared mute doc per item; blasphemy/tier/skip-block prefs on details. Safe playback overlays.",
+    "overview": "Shared mute doc; details prefs; playback-safe overlays.",
     "owner": "Media-Word-Filter",
     "versions": [
+      {
+        "version": "1.0.15.0",
+        "changelog": "Duck video.volume instead of video.muted to avoid Chromium HTML5 mute icon flash.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-15/jellyfin-plugin-mediawordfilter_1.0.15.0.zip",
+        "checksum": "9e50eaefe4db4ebae1fd4dd72110b942",
+        "timestamp": "2026-07-26T15:15:00Z"
+      },
+      {
+        "version": "1.0.14.0",
+        "changelog": "Fix playback (no video-parent CSS mutation). Remove profiles; mutes without user_id. Fix details selects.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-12/jellyfin-plugin-mediawordfilter_1.0.14.0.zip",
+        "checksum": "b7f9def0ead78e23ff1a6237b3933555",
+        "timestamp": "2026-07-26T13:15:00Z"
+      },
       {
         "version": "1.0.13.0",
         "changelog": "Fix playback (no video-parent CSS mutation). Remove profiles; mutes without user_id. Fix details selects.",

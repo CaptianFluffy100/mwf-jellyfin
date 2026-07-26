@@ -85,9 +85,4 @@
   background: #000;
   border: 0;
   box-sizing: border-box;
-  transition:
-    left 0.08s linear,
-    top 0.08s linear,
-    width 0.08s linear,
-    height 0.08s linear;
 }
