@@ -1,6 +1,7 @@
 /**
  * Media Word Filter — Jellyfin Web client (server plugin).
  * Audio mute uses Web Audio GainNode (gain 0 / restore) — avoids Chromium mute/volume icons.
+ * Filter prefs are per Jellyfin user (saved on the server) and apply to all titles.
  * Details-page prefs control blasphemy / profanity tiers / view skip|block|off.
  * Does NOT touch the playback OSD / media bar.
  */
@@ -57,15 +58,18 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.16.0";
+  var CLIENT_VERSION = "1.0.17.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
   var GRAPH_KEY = "__mwfAudioGraph";
+  var PREFS_SAVE_MS = 350;
 
   var state = {
     enabled: readEnabled(),
     prefs: readPrefs(),
+    prefsLoadedFromServer: false,
+    prefsSaveTimer: null,
     itemId: null,
     itemIdSource: null,
     mutes: [],
@@ -116,12 +120,11 @@
 
   function writeEnabled(on) {
     state.enabled = !!on;
-    try {
-      localStorage.setItem(LS_ENABLED, state.enabled ? "1" : "0");
-    } catch (_) {}
+    cachePrefsLocally();
     syncUiControls();
     rebuildFromCachedDoc();
     ensureMutes(state.itemId, true);
+    schedulePrefsSave();
   }
 
   function defaultPrefs() {
@@ -135,25 +138,59 @@
     };
   }
 
+  function normalizePrefsObject(parsed) {
+    var d = defaultPrefs();
+    if (!parsed || typeof parsed !== "object") return d;
+    d.blasphemy = parsed.blasphemy !== false;
+    d.profanity1 = parsed.profanity1 !== false;
+    d.profanity2 = parsed.profanity2 !== false;
+    d.profanity3 = parsed.profanity3 !== false;
+    d.viewMatched =
+      parsed.viewMatched && typeof parsed.viewMatched === "object"
+        ? parsed.viewMatched
+        : {};
+    return d;
+  }
+
   function readPrefs() {
     try {
       var raw = localStorage.getItem(LS_PREFS);
       if (!raw) return defaultPrefs();
-      var parsed = JSON.parse(raw);
-      var d = defaultPrefs();
-      if (!parsed || typeof parsed !== "object") return d;
-      d.blasphemy = parsed.blasphemy !== false;
-      d.profanity1 = parsed.profanity1 !== false;
-      d.profanity2 = parsed.profanity2 !== false;
-      d.profanity3 = parsed.profanity3 !== false;
-      d.viewMatched =
-        parsed.viewMatched && typeof parsed.viewMatched === "object"
-          ? parsed.viewMatched
-          : {};
-      return d;
+      return normalizePrefsObject(JSON.parse(raw));
     } catch (_) {
       return defaultPrefs();
     }
+  }
+
+  function cachePrefsLocally() {
+    try {
+      localStorage.setItem(LS_ENABLED, state.enabled ? "1" : "0");
+      localStorage.setItem(LS_PREFS, JSON.stringify(state.prefs));
+    } catch (_) {}
+  }
+
+  function prefsPayload() {
+    return {
+      enabled: !!state.enabled,
+      blasphemy: state.prefs.blasphemy !== false,
+      profanity1: state.prefs.profanity1 !== false,
+      profanity2: state.prefs.profanity2 !== false,
+      profanity3: state.prefs.profanity3 !== false,
+      viewMatched: state.prefs.viewMatched || {}
+    };
+  }
+
+  function applyPrefsState(doc, enabledOverride) {
+    state.prefs = normalizePrefsObject(doc);
+    if (enabledOverride !== undefined) {
+      state.enabled = !!enabledOverride;
+    } else if (doc && Object.prototype.hasOwnProperty.call(doc, "enabled")) {
+      state.enabled = doc.enabled !== false;
+    }
+    cachePrefsLocally();
+    syncUiControls();
+    rebuildFromCachedDoc();
+    refreshDetailsViewLabels(false);
   }
 
   function writePrefs(partial) {
@@ -162,15 +199,83 @@
       next.viewMatched = partial.viewMatched || {};
     }
     state.prefs = next;
-    try {
-      localStorage.setItem(LS_PREFS, JSON.stringify(state.prefs));
-    } catch (_) {}
+    cachePrefsLocally();
     syncUiControls();
     rebuildFromCachedDoc();
     // Do not rebuild view <select>s on every pref write — that breaks open dropdowns.
     if (partial && Object.prototype.hasOwnProperty.call(partial, "viewMatched")) {
       syncViewSelectValues();
     }
+    schedulePrefsSave();
+  }
+
+  function schedulePrefsSave() {
+    if (state.prefsSaveTimer) clearTimeout(state.prefsSaveTimer);
+    state.prefsSaveTimer = setTimeout(function () {
+      state.prefsSaveTimer = null;
+      savePrefsToServer();
+    }, PREFS_SAVE_MS);
+  }
+
+  function putJson(path, body) {
+    return fetch(apiUrl(path), {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: Object.assign(
+        { "Content-Type": "application/json", Accept: "application/json" },
+        authHeaders()
+      ),
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      if (res.status === 401) {
+        warnOnce("prefs-401", "prefs save returned 401 (not logged in?)");
+        throw new Error("HTTP 401 unauthorized");
+      }
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("HTTP " + res.status + " " + t);
+        });
+      }
+      return res.json();
+    });
+  }
+
+  function savePrefsToServer() {
+    if (!hasAuthToken()) return Promise.resolve();
+    return putJson("MediaWordFilter/prefs", prefsPayload())
+      .then(function () {
+        state.prefsLoadedFromServer = true;
+        log("prefs saved to Jellyfin user");
+      })
+      .catch(function (err) {
+        warnOnce("prefs-save-fail", "could not save filter prefs to Jellyfin", err);
+      });
+  }
+
+  function loadPrefsFromServer() {
+    if (!hasAuthToken()) {
+      return Promise.resolve(false);
+    }
+    return fetchJson("MediaWordFilter/prefs")
+      .then(function (doc) {
+        if (!doc) return false;
+        var stored = doc.stored === true;
+        if (!stored) {
+          // First time on server: push local browser prefs (migrate), then done.
+          return savePrefsToServer().then(function () {
+            state.prefsLoadedFromServer = true;
+            return true;
+          });
+        }
+        applyPrefsState(doc);
+        state.prefsLoadedFromServer = true;
+        log("prefs loaded from Jellyfin user");
+        return true;
+      })
+      .catch(function (err) {
+        warnOnce("prefs-load-fail", "could not load filter prefs from Jellyfin; using local cache", err);
+        return false;
+      });
   }
 
   function setViewMatchedAction(matched, action) {
@@ -864,7 +969,7 @@
         "</div>" +
         '<p class="mwf-sublabel">Scenes (skip / block)</p>' +
         '<div class="mwf-view-list"></div>' +
-        '<p class="mwf-hint">Skip jumps the span. Block covers with boxes. If Skip is chosen but only a block exists, block is used.</p>';
+        '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account (synced across devices). Skip jumps the span; Block covers with boxes. If Skip is chosen but only a block exists, block is used.</p>';
 
       var mountParent =
         anchor.closest(".selectContainer, .inputContainer, .mediaInfoItem") || anchor.parentElement;
@@ -1557,6 +1662,20 @@
       mountDetailsPanel();
       setInterval(tick, POLL_MS);
       tick();
+      // Pull account prefs once auth is ready (retries briefly after login).
+      var prefsAttempts = 0;
+      var prefsTimer = setInterval(function () {
+        prefsAttempts++;
+        if (!hasAuthToken()) {
+          if (prefsAttempts >= 40) clearInterval(prefsTimer);
+          return;
+        }
+        clearInterval(prefsTimer);
+        loadPrefsFromServer().then(function () {
+          mountDetailsPanel();
+          tick();
+        });
+      }, 250);
       log("client ready v" + CLIENT_VERSION, FLAGS);
     } catch (err) {
       console.warn("[mwf-plugin] init failed", err);

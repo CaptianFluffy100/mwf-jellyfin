@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using System.Security.Claims;
 using System.Text;
 using Jellyfin.Plugin.MediaWordFilter.Services;
 using MediaBrowser.Common.Api;
@@ -17,16 +18,22 @@ namespace Jellyfin.Plugin.MediaWordFilter.Controllers;
 public class MwfController : ControllerBase
 {
     private readonly MwfProxyService _proxy;
+    private readonly UserFilterPrefsStore _prefsStore;
     private readonly ILogger<MwfController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MwfController"/> class.
     /// </summary>
     /// <param name="proxy">MWF proxy.</param>
+    /// <param name="prefsStore">Per-user filter prefs store.</param>
     /// <param name="logger">Logger.</param>
-    public MwfController(MwfProxyService proxy, ILogger<MwfController> logger)
+    public MwfController(
+        MwfProxyService proxy,
+        UserFilterPrefsStore prefsStore,
+        ILogger<MwfController> logger)
     {
         _proxy = proxy;
+        _prefsStore = prefsStore;
         _logger = logger;
     }
 
@@ -139,6 +146,60 @@ public class MwfController : ControllerBase
     }
 
     /// <summary>
+    /// Get filter preferences for the authenticated Jellyfin user (global across titles).
+    /// </summary>
+    /// <returns>Prefs JSON.</returns>
+    [HttpGet("prefs")]
+    [Authorize]
+    public ActionResult GetPrefs()
+    {
+        var userId = ResolveUserId();
+        if (userId is null)
+        {
+            return Unauthorized(new { error = "Authentication required" });
+        }
+
+        var prefs = _prefsStore.Get(userId.Value);
+        prefs.Stored = _prefsStore.Exists(userId.Value);
+        return Ok(prefs);
+    }
+
+    /// <summary>
+    /// Save filter preferences for the authenticated Jellyfin user.
+    /// </summary>
+    /// <param name="body">Prefs JSON.</param>
+    /// <returns>Saved prefs.</returns>
+    [HttpPut("prefs")]
+    [Authorize]
+    public ActionResult PutPrefs([FromBody] UserFilterPrefs? body)
+    {
+        var userId = ResolveUserId();
+        if (userId is null)
+        {
+            return Unauthorized(new { error = "Authentication required" });
+        }
+
+        if (body is null)
+        {
+            return BadRequest(new { error = "prefs body required" });
+        }
+
+        try
+        {
+            _prefsStore.Put(userId.Value, body);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed saving MWF prefs for user {UserId}", userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to save prefs" });
+        }
+
+        var saved = _prefsStore.Get(userId.Value);
+        saved.Stored = true;
+        return Ok(saved);
+    }
+
+    /// <summary>
     /// Public client feature flags (no secrets).
     /// </summary>
     /// <returns>Flags JSON.</returns>
@@ -158,6 +219,32 @@ public class MwfController : ControllerBase
             enablePrefetch = plugin.Configuration.EnablePrefetch,
             mwfConfigured = !string.IsNullOrWhiteSpace(plugin.GetMwfBaseUrl())
         });
+    }
+
+    private Guid? ResolveUserId()
+    {
+        foreach (var claim in User.Claims)
+        {
+            var type = claim.Type ?? string.Empty;
+            if (type.Equals(ClaimTypes.NameIdentifier, StringComparison.OrdinalIgnoreCase)
+                || type.Equals("Jellyfin-UserId", StringComparison.OrdinalIgnoreCase)
+                || type.EndsWith("/nameidentifier", StringComparison.OrdinalIgnoreCase)
+                || type.Equals("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Guid.TryParse(claim.Value, out var guid))
+                {
+                    return guid;
+                }
+            }
+        }
+
+        // Fallback: some builds put the user id in Name.
+        if (Guid.TryParse(User.Identity?.Name, out var fromName))
+        {
+            return fromName;
+        }
+
+        return null;
     }
 
     private ActionResult ProxyResult((int StatusCode, string Body, string? ContentType)? result)

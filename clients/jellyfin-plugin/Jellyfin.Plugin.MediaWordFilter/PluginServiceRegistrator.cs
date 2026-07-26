@@ -17,6 +17,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddHttpClient(MwfProxyService.HttpClientName);
         serviceCollection.AddSingleton<MwfProxyService>();
+        serviceCollection.AddSingleton<UserFilterPrefsStore>();
         serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
         // ScriptInjectionStartupTask is discovered via IScheduledTask; no hosted service.
     }
