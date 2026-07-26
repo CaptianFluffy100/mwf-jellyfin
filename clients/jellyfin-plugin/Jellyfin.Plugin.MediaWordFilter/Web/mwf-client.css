@@ -63,10 +63,6 @@
   color: inherit;
 }
 
-.mwf-details-panel select.mwf-profile-select {
-  min-width: 10rem;
-}
-
 .mwf-toggle {
   display: inline-flex;
   align-items: center;
@@ -76,12 +72,11 @@
   user-select: none;
 }
 
-/* Cover boxes during playback */
+/* Cover boxes during playback — fixed layer over the video, never mutates player DOM. */
 .mwf-block-overlay {
-  position: absolute;
-  inset: 0;
+  position: fixed;
   pointer-events: none;
-  z-index: 5;
+  z-index: 10050;
   overflow: hidden;
 }
 

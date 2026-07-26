@@ -3,17 +3,25 @@
     "category": "General",
     "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
     "name": "Media Word Filter",
-    "description": "Media Word Filter companion: mute.v2 audio tiers + view skip/block with details-page prefs.",
-    "overview": "Details-page filter prefs (blasphemy, profanity T1\u2013T3, per-label skip/block). Playback mute via video.muted; skip seeks; block overlays.",
+    "description": "Media Word Filter: mute.v2 + details prefs. No profiles.",
+    "overview": "Shared mute doc per item; blasphemy/tier/skip-block prefs on details. Safe playback overlays.",
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.13.0",
+        "changelog": "Fix playback (no video-parent CSS mutation). Remove profiles; mutes without user_id. Fix details selects.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-13/jellyfin-plugin-mediawordfilter_1.0.13.0.zip",
+        "checksum": "b7f9def0ead78e23ff1a6237b3933555",
+        "timestamp": "2026-07-26T13:15:00Z"
+      },
+      {
         "version": "1.0.12.0",
-        "changelog": "mute.v2: details prefs for blasphemy/profanity tiers and per-matched skip/block/off; playback skip seek + block overlays. Audio mute uses video.muted.",
+        "changelog": "mute.v2 details prefs: blasphemy/tiers + per-matched Off/Block/Skip; view skip/block overlays.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-12/jellyfin-plugin-mediawordfilter_1.0.12.0.zip",
         "checksum": "8b24138a4968a42a6b205ef7826d0032",
-        "timestamp": "2026-07-26T13:00:00Z"
+        "timestamp": "2026-07-26T12:00:00Z"
       },
       {
         "version": "1.0.10.0",

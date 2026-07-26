@@ -14,7 +14,6 @@
   };
 
   var LS_ENABLED = "mwfFilterEnabled";
-  var LS_PROFILE = "mwfProfileUserId";
   var LS_PREFS = "mwfFilterPrefs.v2";
   var POLL_MS = 100;
 
@@ -58,14 +57,11 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.12.0";
+  var CLIENT_VERSION = "1.0.13.0";
 
   var state = {
     enabled: readEnabled(),
     prefs: readPrefs(),
-    profileUserId: readProfile(),
-    profiles: [],
-    profilesLoaded: false,
     itemId: null,
     itemIdSource: null,
     mutes: [],
@@ -82,7 +78,8 @@
     warnOnceKeys: Object.create(null),
     lastTickDiag: null,
     lastSkipId: null,
-    overlayHost: null
+    overlayHost: null,
+    viewLabelsKey: ""
   };
 
   function log() {
@@ -162,7 +159,10 @@
     } catch (_) {}
     syncUiControls();
     rebuildFromCachedDoc();
-    refreshDetailsViewLabels();
+    // Do not rebuild view <select>s on every pref write — that breaks open dropdowns.
+    if (partial && Object.prototype.hasOwnProperty.call(partial, "viewMatched")) {
+      syncViewSelectValues();
+    }
   }
 
   function setViewMatchedAction(matched, action) {
@@ -178,24 +178,14 @@
     return "off";
   }
 
-  function readProfile() {
+  function syncViewSelectValues() {
     try {
-      return localStorage.getItem(LS_PROFILE) || "";
-    } catch (_) {
-      return "";
-    }
-  }
-
-  function writeProfile(id) {
-    state.profileUserId = id || "";
-    try {
-      if (state.profileUserId) localStorage.setItem(LS_PROFILE, state.profileUserId);
-      else localStorage.removeItem(LS_PROFILE);
+      document.querySelectorAll("select.mwf-view-action").forEach(function (sel) {
+        var matched = sel.getAttribute("data-matched");
+        var want = viewActionFor(matched);
+        if (sel.value !== want) sel.value = want;
+      });
     } catch (_) {}
-    syncUiControls();
-    state.muteKey = null;
-    clearCache();
-    ensureMutes(state.itemId, true);
   }
 
   function clearCache() {
@@ -461,7 +451,8 @@
   }
 
   function effectiveProfileUserId() {
-    return state.profileUserId || currentUserId() || "";
+    // Profiles removed — shared mute doc per item only.
+    return "";
   }
 
   function pmCurrentItem() {
@@ -646,7 +637,7 @@
   }
 
   function cacheKey(itemId) {
-    return (itemId || "") + "|" + (effectiveProfileUserId() || "");
+    return itemId || "";
   }
 
   function ensureMutes(itemId, force) {
@@ -686,9 +677,8 @@
       return Promise.resolve(state.mutes || []);
     }
 
-    var uid = effectiveProfileUserId();
+    // Shared item mute doc only — no user_id / profile rematch.
     var path = "MediaWordFilter/mutes/" + encodeURIComponent(itemId);
-    if (uid) path += "?user_id=" + encodeURIComponent(uid);
 
     var p = fetchJson(path)
       .then(function (doc) {
@@ -701,7 +691,7 @@
         } else {
           delete state.warnOnceKeys["empty-mutes:" + key];
         }
-        refreshDetailsViewLabels();
+        refreshDetailsViewLabels(true);
         return state.mutes;
       })
       .catch(function (err) {
@@ -717,68 +707,13 @@
     return p;
   }
 
-  function loadProfiles() {
-    if (state.profilesLoaded) return Promise.resolve(state.profiles);
-    return fetchJson("MediaWordFilter/profiles")
-      .then(function (data) {
-        var list = (data && data.profiles) || [];
-        state.profiles = Array.isArray(list) ? list : [];
-        state.profilesLoaded = true;
-        syncUiControls();
-        return state.profiles;
-      })
-      .catch(function (err) {
-        log("profiles failed", err);
-        state.profiles = [];
-        state.profilesLoaded = true;
-        return state.profiles;
-      });
-  }
-
   function shortId(id) {
     var n = normalizeItemId(id) || String(id);
     return n.slice(0, 8);
   }
 
-  function fillProfileSelect(sel) {
-    if (!sel) return;
-    var curUser = currentUserId() || "";
-    sel.innerHTML = "";
-
-    var optDefault = document.createElement("option");
-    optDefault.value = "";
-    optDefault.textContent = curUser
-      ? "Current user (" + shortId(curUser) + ")"
-      : "Current user";
-    sel.appendChild(optDefault);
-
-    for (var i = 0; i < state.profiles.length; i++) {
-      var p = state.profiles[i];
-      var id = p.jellyfin_user_id || p.jellyfinUserId || p.id || "";
-      if (!id) continue;
-      var opt = document.createElement("option");
-      opt.value = id;
-      opt.textContent = p.display_name || p.displayName || shortId(id);
-      sel.appendChild(opt);
-    }
-
-    if (state.profileUserId) {
-      sel.value = state.profileUserId;
-      if (sel.value !== state.profileUserId) {
-        var syn = document.createElement("option");
-        syn.value = state.profileUserId;
-        syn.textContent = "Profile " + shortId(state.profileUserId);
-        sel.appendChild(syn);
-        sel.value = state.profileUserId;
-      }
-    } else {
-      sel.value = "";
-    }
-  }
-
   function syncUiControls() {
     try {
-      document.querySelectorAll("select.mwf-profile-select").forEach(fillProfileSelect);
       document.querySelectorAll("input.mwf-filter-toggle").forEach(function (el) {
         el.checked = !!state.enabled;
       });
@@ -795,17 +730,23 @@
       document.querySelectorAll("input.mwf-pref-p3").forEach(function (el) {
         el.checked = p.profanity3 !== false;
       });
-      refreshDetailsViewLabels();
+      syncViewSelectValues();
     } catch (_) {}
   }
 
-  function refreshDetailsViewLabels() {
+  function refreshDetailsViewLabels(force) {
     var host = document.querySelector("#mwf-details-panel .mwf-view-list");
     if (!host) return;
     var labels = collectMatchedLabels(state.viewFilter || { block: [], skip: [] });
     if (!labels.length && state.muteDoc) {
       labels = collectMatchedLabels(parseViewFilter(state.muteDoc));
     }
+    var key = labels.join("\0");
+    if (!force && key === state.viewLabelsKey && host.querySelector("select.mwf-view-action")) {
+      syncViewSelectValues();
+      return;
+    }
+    state.viewLabelsKey = key;
     if (!labels.length) {
       host.innerHTML =
         '<p class="mwf-hint">No skip/block scenes for this item yet.</p>';
@@ -889,7 +830,7 @@
 
       var existing = document.getElementById("mwf-details-panel");
       if (existing && state.detailsMountedFor === itemId) {
-        refreshDetailsViewLabels();
+        refreshDetailsViewLabels(false);
         return;
       }
 
@@ -900,10 +841,6 @@
       panel.className = "mwf-details-panel";
       panel.innerHTML =
         '<p class="mwf-label">Media Word Filter</p>' +
-        '<div class="mwf-row">' +
-        '<label class="mwf-toggle"><span>Profile</span></label>' +
-        '<select class="mwf-profile-select" aria-label="MWF profile"></select>' +
-        "</div>" +
         '<div class="mwf-row">' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-filter-toggle" /> Use filter</label>' +
         "</div>" +
@@ -926,11 +863,7 @@
         anchor.insertAdjacentElement("afterend", panel);
       }
 
-      var sel = panel.querySelector("select.mwf-profile-select");
       var chk = panel.querySelector("input.mwf-filter-toggle");
-      sel.addEventListener("change", function () {
-        writeProfile(sel.value || "");
-      });
       chk.addEventListener("change", function () {
         writeEnabled(chk.checked);
       });
@@ -948,10 +881,8 @@
       });
 
       state.detailsMountedFor = itemId;
-      loadProfiles().then(function () {
-        fillProfileSelect(sel);
-        syncUiControls();
-      });
+      state.viewLabelsKey = "";
+      syncUiControls();
 
       if (itemId) {
         if (itemId !== state.itemId) {
@@ -959,7 +890,7 @@
           state.itemIdSource = "details";
         }
         ensureMutes(itemId, false).then(function () {
-          refreshDetailsViewLabels();
+          refreshDetailsViewLabels(true);
         });
       }
     } catch (err) {
@@ -1154,20 +1085,25 @@
       clearBlockOverlay();
       return null;
     }
-    var parent = video.parentElement;
-    if (!parent) return null;
-    if (getComputedStyle(parent).position === "static") {
-      parent.style.position = "relative";
-    }
+    // Never mutate Jellyfin video parent styles — that breaks playback UI.
     var host = state.overlayHost;
-    if (!host || !host.isConnected || host.parentElement !== parent) {
-      if (host && host.parentElement) host.remove();
+    if (!host || !host.isConnected) {
+      if (host && host.parentElement) {
+        try {
+          host.remove();
+        } catch (_) {}
+      }
       host = document.createElement("div");
       host.className = "mwf-block-overlay";
       host.setAttribute("aria-hidden", "true");
-      parent.appendChild(host);
+      document.body.appendChild(host);
       state.overlayHost = host;
     }
+    var rect = video.getBoundingClientRect();
+    host.style.left = rect.left + "px";
+    host.style.top = rect.top + "px";
+    host.style.width = rect.width + "px";
+    host.style.height = rect.height + "px";
     return host;
   }
 
@@ -1183,6 +1119,9 @@
   function renderBlockOverlay(video, blockScenes, tMs) {
     if (!blockScenes || !blockScenes.length) {
       clearBlockOverlay();
+      return;
+    }
+    if (!video || video.readyState < 2 || video.seeking) {
       return;
     }
     var host = ensureOverlayHost(video);
@@ -1236,12 +1175,21 @@
       state.lastSkipId = null;
       return;
     }
+    // Do not touch seeking/currentTime while the player is still loading.
+    if (video.readyState < 2) {
+      clearBlockOverlay();
+      return;
+    }
     var resolved = resolveViewActions(tMs);
     if (resolved.skip) {
-      if (state.lastSkipId !== resolved.skip.id) {
+      if (
+        state.lastSkipId !== resolved.skip.id &&
+        !video.seeking &&
+        !video.paused
+      ) {
         state.lastSkipId = resolved.skip.id;
         var endSec = Number(resolved.skip.end_ms) / 1000;
-        if (Number.isFinite(endSec)) {
+        if (Number.isFinite(endSec) && endSec > video.currentTime + 0.05) {
           log("skip to", endSec, resolved.skip.matched);
           try {
             video.currentTime = endSec;
@@ -1261,8 +1209,8 @@
       ? "no-video"
       : !state.itemId
         ? "no-item-id"
-        : !state.mutes || !state.mutes.length
-          ? "no-mutes"
+        : !state.muteDoc
+          ? "no-doc"
           : "ready";
     if (diag === state.lastTickDiag) return;
     state.lastTickDiag = diag;
@@ -1270,10 +1218,13 @@
       warnOnce("no-video", "video element not found on #/video route");
     } else if (diag === "no-item-id" && video) {
       warnOnce("no-item-id", "could not resolve Jellyfin item id during playback");
-    } else if (diag === "no-mutes" && video && state.itemId) {
-      warnOnce("no-mutes:" + cacheKey(state.itemId), "no mute ranges loaded for item " + shortId(state.itemId));
     } else if (diag === "ready") {
-      log("mute loop ready", state.mutes.length, "ranges for", shortId(state.itemId));
+      log(
+        "mute loop ready",
+        state.mutes.length,
+        "ranges for",
+        shortId(state.itemId)
+      );
     }
   }
 
@@ -1295,19 +1246,22 @@
         ensureMutes(state.itemId, false);
       }
 
-      var tMs = playbackMs(video);
-      var hasAudio = state.mutes && state.mutes.length;
-      var hasView =
-        ((state.viewFilter.block || []).length || (state.viewFilter.skip || []).length) > 0;
-
-      if (!video || (!hasAudio && !hasView && !state.muteDoc)) {
-        if (state.weMuted) applyMute(video, false);
+      if (!video) {
+        if (state.weMuted) applyMute(null, false);
         clearBlockOverlay();
         tickDiagnostics(video);
         return;
       }
 
-      applyMute(video, hasAudio && inMuteRange(tMs, state.mutes));
+      // Wait until media can play before muting/seeking — avoids stalling startup.
+      if (video.readyState < 2) {
+        tickDiagnostics(video);
+        return;
+      }
+
+      var tMs = playbackMs(video);
+      var hasAudio = state.mutes && state.mutes.length;
+      applyMute(video, !!(hasAudio && inMuteRange(tMs, state.mutes)));
       applyViewFilter(video, tMs);
       tickDiagnostics(video);
     } catch (err) {
@@ -1399,7 +1353,6 @@
 
   function init() {
     try {
-      loadProfiles();
       hookHistory();
       ensurePlaybackHooks();
       observeDom();
