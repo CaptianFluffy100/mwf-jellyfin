@@ -58,10 +58,14 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.19.0";
+  var CLIENT_VERSION = "1.0.20.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
+  // Do not touch mute/fetch/WebAudio until the player has been playing this long.
+  // Attaching MediaElementSource or fetching mutes during load stalls Jellyfin Web
+  // (JMP is fine — it never runs this script).
+  var FILTER_ARM_MS = 2500;
   var GRAPH_KEY = "__mwfAudioGraph";
   var PREFS_SAVE_MS = 350;
 
@@ -91,7 +95,9 @@
     viewLabelsKey: "",
     playbackSettled: false,
     settleTimer: null,
-    hookedVideo: null
+    hookedVideo: null,
+    filtersArmed: false,
+    armTimer: null
   };
 
   function log() {
@@ -764,13 +770,17 @@
       state.lastSkipId = null;
       markPlaybackUnsettled();
       hideBlockOverlay();
-      if (newId) {
+      // Never fetch mutes during browser player startup — that races the stream.
+      if (newId && state.filtersArmed) {
         log("item id", newId, "via", newSource);
         ensureMutes(newId, false).then(function () {
           prefetchNextEpisode(newId);
         });
-      } else {
+      } else if (!newId) {
         state.mutes = [];
+        state.muteDoc = null;
+      } else {
+        log("item id", newId, "via", newSource, "(fetch deferred until filters armed)");
       }
     }
   }
@@ -1122,9 +1132,13 @@
       return state.audioGraph;
     }
 
-    // Never attach during startup — createMediaElementSource mid-load stalls
-    // Chromium/Jellyfin Web playback. Native apps are unaffected (no this script).
-    if (!state.playbackSettled || video.readyState < MIN_READY || video.paused) {
+    // Hard gate: never create MediaElementSource until filters are armed.
+    // createMediaElementSource permanently takes over element audio and will
+    // stall Jellyfin Web if done during load.
+    if (!state.filtersArmed || !state.playbackSettled) {
+      return null;
+    }
+    if (video.readyState < MIN_READY || video.paused) {
       return null;
     }
 
@@ -1136,7 +1150,6 @@
 
     try {
       var ctx = new AC();
-      // createMediaElementSource may only be called once per element.
       var source = ctx.createMediaElementSource(video);
       var gain = ctx.createGain();
       gain.gain.value = 1;
@@ -1146,7 +1159,7 @@
       video[GRAPH_KEY] = graph;
       state.audioGraph = graph;
       resumeAudioContext(ctx);
-      log("audio gain graph attached (lazy, after settle)");
+      log("audio gain graph attached (lazy, after arm)");
       return graph;
     } catch (err) {
       warnOnce(
@@ -1184,8 +1197,11 @@
       return;
     }
 
-    // Lazy graph: only create when we actually need to mute. Creating it on
-    // every tick / canplay was freezing browser playback at load.
+    if (!state.filtersArmed) {
+      return;
+    }
+
+    // Lazy graph: only create when we actually need to mute.
     if (shouldMute) {
       if (!state.playbackSettled || video.readyState < MIN_READY) return;
       var graph = ensureAudioGraph(video);
@@ -1340,6 +1356,43 @@
     }
   }
 
+  function disarmFilters(reason) {
+    state.filtersArmed = false;
+    if (state.armTimer) {
+      clearTimeout(state.armTimer);
+      state.armTimer = null;
+    }
+    markPlaybackUnsettled();
+    if (reason) log("filters disarmed:", reason);
+  }
+
+  function scheduleFilterArm() {
+    if (state.armTimer) clearTimeout(state.armTimer);
+    state.armTimer = setTimeout(function () {
+      state.armTimer = null;
+      var video = state.video || findVideo();
+      if (
+        video &&
+        !video.paused &&
+        !video.seeking &&
+        !video.ended &&
+        video.readyState >= MIN_READY
+      ) {
+        state.filtersArmed = true;
+        state.playbackSettled = true;
+        log("filters armed after", FILTER_ARM_MS, "ms stable play");
+        if (state.enabled && state.itemId) {
+          ensureMutes(state.itemId, false).then(function () {
+            prefetchNextEpisode(state.itemId);
+          });
+        }
+      } else {
+        // Still buffering — try again once playback looks healthy.
+        scheduleFilterArm();
+      }
+    }, FILTER_ARM_MS);
+  }
+
   function schedulePlaybackSettle() {
     if (state.settleTimer) clearTimeout(state.settleTimer);
     state.settleTimer = setTimeout(function () {
@@ -1365,23 +1418,29 @@
     );
   }
 
+  function isVideoHash() {
+    return /#\/video/i.test(location.hash || "");
+  }
+
   function hookVideoLifecycle(video) {
     if (!video || video === state.hookedVideo) return;
     unhookVideoLifecycle();
     state.hookedVideo = video;
     var onBusy = function () {
-      markPlaybackUnsettled();
-      clearBlockOverlay();
+      // During initial load, buffering is normal — only disarm if we had armed.
+      if (state.filtersArmed) {
+        markPlaybackUnsettled();
+        hideBlockOverlay();
+      }
     };
     var onPlaying = function () {
-      // Do NOT attach Web Audio here — that stalls browser load. Graph is lazy.
       schedulePlaybackSettle();
+      if (!state.filtersArmed) scheduleFilterArm();
     };
     video.addEventListener("waiting", onBusy);
     video.addEventListener("seeking", onBusy);
     video.addEventListener("stalled", onBusy);
     video.addEventListener("playing", onPlaying);
-    // canplay fires during buffering — do not treat as settled / do not touch audio.
     state._videoLifecycle = { onBusy: onBusy, onPlaying: onPlaying };
   }
 
@@ -1524,7 +1583,7 @@
   }
 
   function applyViewFilter(video, tMs) {
-    if (!video || !state.enabled) {
+    if (!video || !state.enabled || !state.filtersArmed) {
       hideBlockOverlay();
       state.lastSkipId = null;
       return;
@@ -1592,6 +1651,14 @@
       }
       refreshPlaybackItem(video, !!forceRefresh);
 
+      // Quarantine: on the video route, do nothing filter-related until armed.
+      // This keeps browser startup identical to JMP (no mute fetch / no Web Audio).
+      if (isVideoHash() && !state.filtersArmed) {
+        hideBlockOverlay();
+        tickDiagnostics(video);
+        return;
+      }
+
       if (!state.enabled) {
         if (state.weMuted) applyMute(video, false);
         hideBlockOverlay();
@@ -1600,7 +1667,13 @@
         return;
       }
 
-      if (video && state.itemId && !state.muteDoc && !state.fetchPending[cacheKey(state.itemId)]) {
+      if (
+        state.filtersArmed &&
+        video &&
+        state.itemId &&
+        !state.muteDoc &&
+        !state.fetchPending[cacheKey(state.itemId)]
+      ) {
         ensureMutes(state.itemId, false);
       }
 
@@ -1611,7 +1684,6 @@
         return;
       }
 
-      // Wait until media has future data before muting — avoids stalling startup.
       if (video.readyState < MIN_READY) {
         tickDiagnostics(video);
         return;
@@ -1653,14 +1725,23 @@
       if (!Events || !pm || typeof Events.on !== "function") return false;
 
       Events.on(pm, "playbackstart", function () {
-        markPlaybackUnsettled();
+        disarmFilters("playbackstart");
         schedulePlaybackSettle();
+        // Arm only after stable play — do not fetch/mute on start.
+        scheduleFilterArm();
         tick(true);
       });
       Events.on(pm, "playbackstop", function () {
         if (state.weMuted && state.video) applyMute(state.video, false);
+        // Keep any existing AudioContext connected at gain=1 — closing it can
+        // permanently silence a reused <video> element in Chromium.
+        if (state.audioGraph && state.audioGraph.gain) {
+          setGainValue(state.audioGraph, 1);
+        }
+        state.weMuted = false;
         clearBlockOverlay();
         unhookVideoLifecycle();
+        disarmFilters("playbackstop");
         state.lastSkipId = null;
         if (!findVideo()) {
           state.video = null;
@@ -1673,7 +1754,7 @@
         }
       });
       Events.on(pm, "playerchange", function () {
-        markPlaybackUnsettled();
+        disarmFilters("playerchange");
         tick(true);
       });
       state.playbackHooksAttached = true;

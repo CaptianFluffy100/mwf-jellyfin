@@ -2,12 +2,12 @@
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
   "description": "Media Word Filter companion for Jellyfin Web. mute.v2 audio tiers + view skip/block with details-page prefs.",
-  "overview": "Per-user filter prefs synced via Jellyfin. Lazy Web Audio gain mute. Playback-safe overlays.",
+  "overview": "Per-user filter prefs. Playback filters arm only after stable play (browser-safe).",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.19.0",
-  "changelog": "Fix browser playback stuck on load: defer Web Audio gain graph until after settle and only on first mute.",
+  "version": "1.0.20.0",
+  "changelog": "Quarantine browser playback: no mute fetch/Web Audio/skip until 2.5s of stable play. Fixes load stall vs JMP.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-26T17:00:00Z"
+  "timestamp": "2026-07-26T17:10:00Z"
 }

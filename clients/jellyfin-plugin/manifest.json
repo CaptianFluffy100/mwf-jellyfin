@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.20.0",
+        "changelog": "Quarantine browser playback: no mute fetch/Web Audio/skip until 2.5s stable play.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-20/jellyfin-plugin-mediawordfilter_1.0.20.0.zip",
+        "checksum": "1f8841d4bd00b0b383635d08b727888f",
+        "timestamp": "2026-07-26T17:10:00Z"
+      },
+      {
         "version": "1.0.19.0",
         "changelog": "Fix browser playback stuck on load: defer Web Audio gain graph until after settle / first mute.",
         "targetAbi": "10.11.0.0",
