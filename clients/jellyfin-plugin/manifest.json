@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.22.0",
+        "changelog": "Content Found shows block counts (and Off). Scene block+skip counted once. Audio shift (ms) pref to align mutes with the stream.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-22/jellyfin-plugin-mediawordfilter_1.0.22.0.zip",
+        "checksum": "10b92c8679287255bbbf1a67beb9fd26",
+        "timestamp": "2026-07-26T20:00:00Z"
+      },
+      {
         "version": "1.0.21.0",
         "changelog": "Details UI: Filter Status + Content Found summary; options collapsed. Mild/Moderate/Strong; prettier scene labels.",
         "targetAbi": "10.11.0.0",

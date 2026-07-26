@@ -17,7 +17,7 @@ public static class ClientScriptInjection
     /// <summary>
     /// Plugin version string used in the injected script URL cache-buster.
     /// </summary>
-    public const string PluginVersion = "1.0.21.0";
+    public const string PluginVersion = "1.0.22.0";
 
     private const string Marker = "data-mwf-plugin=\"1\"";
     private static readonly HashSet<string> LoggedPayloadShapes = new(StringComparer.Ordinal);

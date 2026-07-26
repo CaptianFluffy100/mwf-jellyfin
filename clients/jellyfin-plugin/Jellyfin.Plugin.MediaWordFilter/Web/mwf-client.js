@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.21.0";
+  var CLIENT_VERSION = "1.0.22.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -140,6 +140,8 @@
       profanity1: true,
       profanity2: true,
       profanity3: true,
+      // Delay (+) or advance (−) mute timing vs the stream, in milliseconds.
+      audioShiftMs: 0,
       // matched label -> "skip" | "block" | "off"
       viewMatched: {}
     };
@@ -157,12 +159,17 @@
     if (p2 === undefined) p2 = parsed.Profanity2;
     var p3 = parsed.profanity3;
     if (p3 === undefined) p3 = parsed.Profanity3;
+    var shift = parsed.audioShiftMs;
+    if (shift === undefined) shift = parsed.AudioShiftMs;
     var vm = parsed.viewMatched;
     if (vm === undefined) vm = parsed.ViewMatched;
     d.blasphemy = blasphemy !== false;
     d.profanity1 = p1 !== false;
     d.profanity2 = p2 !== false;
     d.profanity3 = p3 !== false;
+    var n = Number(shift);
+    if (!Number.isFinite(n)) n = 0;
+    d.audioShiftMs = Math.max(-10000, Math.min(10000, Math.round(n)));
     d.viewMatched = vm && typeof vm === "object" ? vm : {};
     return d;
   }
@@ -191,6 +198,7 @@
       profanity1: state.prefs.profanity1 !== false,
       profanity2: state.prefs.profanity2 !== false,
       profanity3: state.prefs.profanity3 !== false,
+      audioShiftMs: Number(state.prefs.audioShiftMs) || 0,
       viewMatched: state.prefs.viewMatched || {}
     };
   }
@@ -220,7 +228,7 @@
     if (partial && Object.prototype.hasOwnProperty.call(partial, "viewMatched")) {
       next.viewMatched = partial.viewMatched || {};
     }
-    state.prefs = next;
+    state.prefs = normalizePrefsObject(next);
     cachePrefsLocally();
     syncUiControls();
     rebuildFromCachedDoc();
@@ -904,6 +912,10 @@
       document.querySelectorAll("input.mwf-pref-p3").forEach(function (el) {
         el.checked = p.profanity3 !== false;
       });
+      document.querySelectorAll("input.mwf-audio-shift").forEach(function (el) {
+        var v = Number(p.audioShiftMs) || 0;
+        if (String(el.value) !== String(v)) el.value = String(v);
+      });
       syncViewSelectValues();
       refreshDetailsSummary();
     } catch (_) {}
@@ -957,55 +969,106 @@
     return Array.isArray(list) ? list.length : 0;
   }
 
-  function audioContentBullets(doc) {
-    var bullets = [];
-    var raw = doc && doc.mutes;
-    if (!raw) return bullets;
-    if (Array.isArray(raw)) {
-      if (raw.length) bullets.push("Audio mutes (" + raw.length + ")");
-      return bullets;
-    }
-    if (countRanges(raw.blasphemy) > 0) bullets.push("Blasphemy");
-    var tiers = [];
-    if (raw.profanity && typeof raw.profanity === "object") {
-      if (countRanges(raw.profanity["1"] || raw.profanity.tier1) > 0) tiers.push(1);
-      if (countRanges(raw.profanity["2"] || raw.profanity.tier2) > 0) tiers.push(2);
-      if (countRanges(raw.profanity["3"] || raw.profanity.tier3) > 0) tiers.push(3);
-    }
-    if (tiers.length === 3) {
-      bullets.push("Profanity (Mild–Strong)");
-    } else if (tiers.length === 1) {
-      bullets.push("Profanity (" + PROFANITY_TIER_LABELS[tiers[0]] + ")");
-    } else if (tiers.length > 1) {
-      bullets.push(
-        "Profanity (" +
-          tiers
-            .map(function (t) {
-              return PROFANITY_TIER_LABELS[t];
-            })
-            .join(", ") +
-          ")"
-      );
-    }
-    return bullets;
+  function blockSuffix(enabled, count) {
+    return enabled ? "(" + count + ")" : "(Off)";
   }
 
-  function sceneContentBullets(viewFilter) {
-    var counts = {};
-    var lists = [(viewFilter && viewFilter.block) || [], (viewFilter && viewFilter.skip) || []];
-    for (var i = 0; i < lists.length; i++) {
-      for (var j = 0; j < lists[i].length; j++) {
-        var m = (lists[i][j].matched || "").trim();
-        if (!m) continue;
-        counts[m] = (counts[m] || 0) + 1;
+  /** Structured audio summary: counts of what will be blocked (or Off). */
+  function audioContentTree(doc) {
+    var p = state.prefs || defaultPrefs();
+    var raw = doc && doc.mutes;
+    var items = [];
+    if (!raw) return items;
+
+    if (Array.isArray(raw)) {
+      if (raw.length) {
+        items.push({
+          label: "Audio mutes",
+          suffix: blockSuffix(true, raw.length),
+          children: null
+        });
+      }
+      return items;
+    }
+
+    var bCount = countRanges(raw.blasphemy);
+    if (bCount > 0) {
+      items.push({
+        label: "Blasphemy",
+        suffix: blockSuffix(p.blasphemy !== false, bCount),
+        children: null
+      });
+    }
+
+    var children = [];
+    if (raw.profanity && typeof raw.profanity === "object") {
+      var tiers = [
+        {
+          n: 1,
+          label: "Mild",
+          count: countRanges(raw.profanity["1"] || raw.profanity.tier1),
+          on: p.profanity1 !== false
+        },
+        {
+          n: 2,
+          label: "Moderate",
+          count: countRanges(raw.profanity["2"] || raw.profanity.tier2),
+          on: p.profanity2 !== false
+        },
+        {
+          n: 3,
+          label: "Strong",
+          count: countRanges(raw.profanity["3"] || raw.profanity.tier3),
+          on: p.profanity3 !== false
+        }
+      ];
+      for (var i = 0; i < tiers.length; i++) {
+        if (tiers[i].count <= 0) continue;
+        children.push({
+          label: tiers[i].label,
+          suffix: blockSuffix(tiers[i].on, tiers[i].count)
+        });
       }
     }
-    return Object.keys(counts)
+    if (children.length) {
+      items.push({ label: "Profanity", suffix: "", children: children });
+    }
+    return items;
+  }
+
+  /**
+   * Scene counts per matched label. Block+skip for the same span count once
+   * (e.g. "Both" edits share start/end/matched).
+   */
+  function sceneContentBullets(viewFilter) {
+    var byMatched = Object.create(null);
+    function add(scene) {
+      var m = (scene.matched || "").trim();
+      if (!m) return;
+      var dedupe =
+        m +
+        "\0" +
+        String(scene.start_ms) +
+        "\0" +
+        String(scene.end_ms);
+      if (!byMatched[m]) byMatched[m] = Object.create(null);
+      byMatched[m][dedupe] = true;
+    }
+    var blocks = (viewFilter && viewFilter.block) || [];
+    var skips = (viewFilter && viewFilter.skip) || [];
+    for (var i = 0; i < blocks.length; i++) add(blocks[i]);
+    for (var j = 0; j < skips.length; j++) add(skips[j]);
+
+    return Object.keys(byMatched)
       .sort(function (a, b) {
         return prettySceneLabel(a).localeCompare(prettySceneLabel(b));
       })
       .map(function (key) {
-        return { key: key, label: prettySceneLabel(key), count: counts[key] };
+        return {
+          key: key,
+          label: prettySceneLabel(key),
+          count: Object.keys(byMatched[key]).length
+        };
       });
   }
 
@@ -1026,7 +1089,7 @@
     var doc = state.muteDoc;
     var vf = state.viewFilter || { block: [], skip: [] };
     if (doc) vf = parseViewFilter(doc);
-    var audio = audioContentBullets(doc);
+    var audio = audioContentTree(doc);
     var scenes = sceneContentBullets(vf);
     if (!audio.length && !scenes.length) {
       foundEl.innerHTML =
@@ -1038,13 +1101,31 @@
       html +=
         '<div class="mwf-found-group">' +
         '<p class="mwf-found-group-title">🔇 Audio</p>' +
-        '<ul class="mwf-found-list">' +
-        audio
-          .map(function (b) {
-            return "<li>" + escapeHtml(b) + "</li>";
-          })
-          .join("") +
-        "</ul></div>";
+        '<ul class="mwf-found-list">';
+      for (var a = 0; a < audio.length; a++) {
+        var item = audio[a];
+        html +=
+          "<li>" +
+          escapeHtml(item.label) +
+          (item.suffix
+            ? ' <span class="mwf-count">' + escapeHtml(item.suffix) + "</span>"
+            : "");
+        if (item.children && item.children.length) {
+          html += '<ul class="mwf-found-sublist">';
+          for (var c = 0; c < item.children.length; c++) {
+            var ch = item.children[c];
+            html +=
+              "<li>" +
+              escapeHtml(ch.label) +
+              ' <span class="mwf-count">' +
+              escapeHtml(ch.suffix) +
+              "</span></li>";
+          }
+          html += "</ul>";
+        }
+        html += "</li>";
+      }
+      html += "</ul></div>";
     }
     if (scenes.length) {
       html +=
@@ -1056,7 +1137,7 @@
             return (
               "<li>" +
               escapeHtml(s.label) +
-              " <span class=\"mwf-count\">(" +
+              ' <span class="mwf-count">(' +
               s.count +
               ")</span></li>"
             );
@@ -1213,6 +1294,12 @@
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p2" /> Moderate</label>' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p3" /> Strong</label>' +
         "</div>" +
+        '<div class="mwf-row mwf-shift-row">' +
+        '<label class="mwf-shift-label">Audio shift (ms) ' +
+        '<input type="number" class="mwf-audio-shift" step="10" min="-10000" max="10000" />' +
+        "</label>" +
+        "</div>" +
+        '<p class="mwf-hint mwf-shift-hint">Positive delays mutes; negative advances them (line up with the stream).</p>' +
         '<p class="mwf-sublabel">Scenes (skip / block)</p>' +
         '<div class="mwf-view-list"></div>' +
         '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account. Mild / Moderate / Strong are profanity levels. Skip jumps the span; Block covers with boxes.</p>' +
@@ -1244,6 +1331,11 @@
       });
       panel.querySelector(".mwf-pref-p3").addEventListener("change", function (e) {
         writePrefs({ profanity3: e.target.checked });
+      });
+      panel.querySelector(".mwf-audio-shift").addEventListener("change", function (e) {
+        var n = Number(e.target.value);
+        if (!Number.isFinite(n)) n = 0;
+        writePrefs({ audioShiftMs: n });
       });
 
       state.detailsMountedFor = itemId;
@@ -1887,7 +1979,11 @@
 
       var tMs = playbackMs(video);
       var hasAudio = state.mutes && state.mutes.length;
-      applyMute(video, !!(hasAudio && inMuteRange(tMs, state.mutes)));
+      var audioShift = Number(state.prefs && state.prefs.audioShiftMs) || 0;
+      applyMute(
+        video,
+        !!(hasAudio && inMuteRange(tMs - audioShift, state.mutes))
+      );
       applyViewFilter(video, tMs);
       tickDiagnostics(video);
     } catch (err) {

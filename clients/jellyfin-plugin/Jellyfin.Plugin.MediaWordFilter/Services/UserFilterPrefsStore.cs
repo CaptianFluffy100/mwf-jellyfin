@@ -114,6 +114,14 @@ public sealed class UserFilterPrefsStore
     {
         prefs ??= new UserFilterPrefs();
         prefs.ViewMatched ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (prefs.AudioShiftMs < -10000)
+        {
+            prefs.AudioShiftMs = -10000;
+        }
+        else if (prefs.AudioShiftMs > 10000)
+        {
+            prefs.AudioShiftMs = 10000;
+        }
 
         var cleaned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in prefs.ViewMatched)
