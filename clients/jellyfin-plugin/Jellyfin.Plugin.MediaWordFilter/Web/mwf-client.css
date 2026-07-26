@@ -2,10 +2,97 @@
 
 .mwf-details-panel {
   margin: 0.75rem 0 1rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: 0.35rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.4rem;
   background: rgba(0, 0, 0, 0.28);
-  max-width: 32rem;
+  max-width: 28rem;
+}
+
+.mwf-details-panel .mwf-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+  margin: 0 0 0.35rem;
+}
+
+.mwf-details-panel .mwf-label + .mwf-label,
+.mwf-details-panel .mwf-found + .mwf-label,
+.mwf-details-panel .mwf-status + .mwf-label {
+  margin-top: 0.9rem;
+}
+
+.mwf-status {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.mwf-status-on {
+  color: #8fd68f;
+}
+
+.mwf-status-off {
+  opacity: 0.55;
+}
+
+.mwf-found {
+  margin: 0;
+}
+
+.mwf-found-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  opacity: 0.6;
+}
+
+.mwf-found-group {
+  margin: 0.45rem 0 0;
+}
+
+.mwf-found-group-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.mwf-found-list {
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  list-style: disc;
+}
+
+.mwf-found-list li {
+  margin: 0.12rem 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.mwf-edit-toggle {
+  margin-top: 0.85rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.mwf-edit-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mwf-options {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mwf-options.mwf-hidden {
+  display: none;
 }
 
 .mwf-details-panel .mwf-row {
@@ -14,13 +101,6 @@
   gap: 0.5rem 0.75rem;
   align-items: center;
   margin-top: 0.4rem;
-}
-
-.mwf-details-panel .mwf-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  opacity: 0.9;
-  margin: 0;
 }
 
 .mwf-details-panel .mwf-sublabel {
@@ -33,7 +113,7 @@
 }
 
 .mwf-details-panel .mwf-hint {
-  margin: 0.35rem 0 0;
+  margin: 0.45rem 0 0;
   font-size: 0.75rem;
   opacity: 0.65;
   line-height: 1.35;

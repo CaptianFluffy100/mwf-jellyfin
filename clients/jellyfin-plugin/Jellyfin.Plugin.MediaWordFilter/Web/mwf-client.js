@@ -2,7 +2,7 @@
  * Media Word Filter — Jellyfin Web client (server plugin).
  * Audio mute uses Web Audio GainNode (gain 0 / restore) — avoids Chromium mute/volume icons.
  * Filter prefs are per Jellyfin user (saved on the server) and apply to all titles.
- * Details-page prefs control blasphemy / profanity tiers / view skip|block|off.
+ * Details page shows a content summary; options stay collapsed until Edit options.
  * Does NOT touch the playback OSD / media bar.
  */
 (function () {
@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.20.0";
+  var CLIENT_VERSION = "1.0.21.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -87,6 +87,7 @@
     cache: Object.create(null),
     fetchPending: Object.create(null),
     detailsMountedFor: null,
+    detailsOptionsOpen: false,
     playbackHooksAttached: false,
     warnOnceKeys: Object.create(null),
     lastTickDiag: null,
@@ -904,7 +905,182 @@
         el.checked = p.profanity3 !== false;
       });
       syncViewSelectValues();
+      refreshDetailsSummary();
     } catch (_) {}
+  }
+
+  var SCENE_LABEL_MAP = {
+    nudity: "Nudity",
+    sex: "Sex",
+    sexual: "Sexual Content",
+    sexting: "Sexting",
+    gore: "Gore",
+    violence: "Violence",
+    witchcraft: "Witchcraft",
+    "rude gesture": "Rude Gesture",
+    "rude gestures": "Rude Gesture",
+    "middle finger": "Rude Gesture",
+    blood: "Blood",
+    drugs: "Drugs",
+    alcohol: "Alcohol",
+    smoking: "Smoking",
+    horror: "Horror",
+    jump: "Jump Scare",
+    "jump scare": "Jump Scare"
+  };
+
+  var PROFANITY_TIER_LABELS = {
+    1: "Mild",
+    2: "Moderate",
+    3: "Strong"
+  };
+
+  function prettySceneLabel(raw) {
+    var cleaned = String(raw || "")
+      .trim()
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ");
+    if (!cleaned) return "Scene";
+    var key = cleaned.toLowerCase();
+    if (SCENE_LABEL_MAP[key]) return SCENE_LABEL_MAP[key];
+    return cleaned
+      .split(" ")
+      .map(function (w) {
+        if (!w) return w;
+        if (/^[A-Z0-9]+$/.test(w) && w.length <= 3) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(" ");
+  }
+
+  function countRanges(list) {
+    return Array.isArray(list) ? list.length : 0;
+  }
+
+  function audioContentBullets(doc) {
+    var bullets = [];
+    var raw = doc && doc.mutes;
+    if (!raw) return bullets;
+    if (Array.isArray(raw)) {
+      if (raw.length) bullets.push("Audio mutes (" + raw.length + ")");
+      return bullets;
+    }
+    if (countRanges(raw.blasphemy) > 0) bullets.push("Blasphemy");
+    var tiers = [];
+    if (raw.profanity && typeof raw.profanity === "object") {
+      if (countRanges(raw.profanity["1"] || raw.profanity.tier1) > 0) tiers.push(1);
+      if (countRanges(raw.profanity["2"] || raw.profanity.tier2) > 0) tiers.push(2);
+      if (countRanges(raw.profanity["3"] || raw.profanity.tier3) > 0) tiers.push(3);
+    }
+    if (tiers.length === 3) {
+      bullets.push("Profanity (Mild–Strong)");
+    } else if (tiers.length === 1) {
+      bullets.push("Profanity (" + PROFANITY_TIER_LABELS[tiers[0]] + ")");
+    } else if (tiers.length > 1) {
+      bullets.push(
+        "Profanity (" +
+          tiers
+            .map(function (t) {
+              return PROFANITY_TIER_LABELS[t];
+            })
+            .join(", ") +
+          ")"
+      );
+    }
+    return bullets;
+  }
+
+  function sceneContentBullets(viewFilter) {
+    var counts = {};
+    var lists = [(viewFilter && viewFilter.block) || [], (viewFilter && viewFilter.skip) || []];
+    for (var i = 0; i < lists.length; i++) {
+      for (var j = 0; j < lists[i].length; j++) {
+        var m = (lists[i][j].matched || "").trim();
+        if (!m) continue;
+        counts[m] = (counts[m] || 0) + 1;
+      }
+    }
+    return Object.keys(counts)
+      .sort(function (a, b) {
+        return prettySceneLabel(a).localeCompare(prettySceneLabel(b));
+      })
+      .map(function (key) {
+        return { key: key, label: prettySceneLabel(key), count: counts[key] };
+      });
+  }
+
+  function refreshDetailsSummary() {
+    var panel = document.getElementById("mwf-details-panel");
+    if (!panel) return;
+    var statusEl = panel.querySelector(".mwf-status");
+    var foundEl = panel.querySelector(".mwf-found");
+    if (statusEl) {
+      if (state.enabled) {
+        statusEl.innerHTML = '<span class="mwf-status-on">✓ Enabled</span>';
+      } else {
+        statusEl.innerHTML = '<span class="mwf-status-off">○ Disabled</span>';
+      }
+    }
+    if (!foundEl) return;
+
+    var doc = state.muteDoc;
+    var vf = state.viewFilter || { block: [], skip: [] };
+    if (doc) vf = parseViewFilter(doc);
+    var audio = audioContentBullets(doc);
+    var scenes = sceneContentBullets(vf);
+    if (!audio.length && !scenes.length) {
+      foundEl.innerHTML =
+        '<p class="mwf-found-empty">No filter content for this title yet.</p>';
+      return;
+    }
+    var html = "";
+    if (audio.length) {
+      html +=
+        '<div class="mwf-found-group">' +
+        '<p class="mwf-found-group-title">🔇 Audio</p>' +
+        '<ul class="mwf-found-list">' +
+        audio
+          .map(function (b) {
+            return "<li>" + escapeHtml(b) + "</li>";
+          })
+          .join("") +
+        "</ul></div>";
+    }
+    if (scenes.length) {
+      html +=
+        '<div class="mwf-found-group">' +
+        '<p class="mwf-found-group-title">🎬 Scenes</p>' +
+        '<ul class="mwf-found-list">' +
+        scenes
+          .map(function (s) {
+            return (
+              "<li>" +
+              escapeHtml(s.label) +
+              " <span class=\"mwf-count\">(" +
+              s.count +
+              ")</span></li>"
+            );
+          })
+          .join("") +
+        "</ul></div>";
+    }
+    foundEl.innerHTML = html;
+  }
+
+  function setDetailsOptionsOpen(open) {
+    state.detailsOptionsOpen = !!open;
+    var panel = document.getElementById("mwf-details-panel");
+    if (!panel) return;
+    var opts = panel.querySelector(".mwf-options");
+    var btn = panel.querySelector(".mwf-edit-toggle");
+    if (opts) {
+      if (state.detailsOptionsOpen) opts.classList.remove("mwf-hidden");
+      else opts.classList.add("mwf-hidden");
+    }
+    if (btn) {
+      btn.textContent = state.detailsOptionsOpen ? "Hide options" : "Edit options";
+      btn.setAttribute("aria-expanded", state.detailsOptionsOpen ? "true" : "false");
+    }
   }
 
   function refreshDetailsViewLabels(force) {
@@ -917,26 +1093,29 @@
     var key = labels.join("\0");
     if (!force && key === state.viewLabelsKey && host.querySelector("select.mwf-view-action")) {
       syncViewSelectValues();
+      refreshDetailsSummary();
       return;
     }
     state.viewLabelsKey = key;
     if (!labels.length) {
       host.innerHTML =
         '<p class="mwf-hint">No skip/block scenes for this item yet.</p>';
+      refreshDetailsSummary();
       return;
     }
     host.innerHTML = labels
       .map(function (label) {
         var cur = viewActionFor(label);
+        var pretty = prettySceneLabel(label);
         return (
           '<div class="mwf-row mwf-view-row">' +
           '<span class="mwf-matched">' +
-          escapeHtml(label) +
+          escapeHtml(pretty) +
           "</span>" +
           '<select class="mwf-view-action" data-matched="' +
           escapeAttr(label) +
           '" aria-label="Action for ' +
-          escapeAttr(label) +
+          escapeAttr(pretty) +
           '">' +
           '<option value="off"' +
           (cur === "off" ? " selected" : "") +
@@ -956,6 +1135,7 @@
         setViewMatchedAction(sel.getAttribute("data-matched"), sel.value);
       });
     });
+    refreshDetailsSummary();
   }
 
   function escapeHtml(s) {
@@ -1004,6 +1184,8 @@
       var existing = document.getElementById("mwf-details-panel");
       if (existing && state.detailsMountedFor === itemId) {
         refreshDetailsViewLabels(false);
+        refreshDetailsSummary();
+        setDetailsOptionsOpen(!!state.detailsOptionsOpen);
         return;
       }
 
@@ -1013,20 +1195,28 @@
       panel.id = "mwf-details-panel";
       panel.className = "mwf-details-panel";
       panel.innerHTML =
-        '<p class="mwf-label">Media Word Filter</p>' +
+        '<div class="mwf-summary">' +
+        '<p class="mwf-label">Filter Status</p>' +
+        '<p class="mwf-status"></p>' +
+        '<p class="mwf-label">Content Found</p>' +
+        '<div class="mwf-found"></div>' +
+        '<button type="button" class="mwf-edit-toggle" aria-expanded="false">Edit options</button>' +
+        "</div>" +
+        '<div class="mwf-options mwf-hidden">' +
         '<div class="mwf-row">' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-filter-toggle" /> Use filter</label>' +
         "</div>" +
         '<p class="mwf-sublabel">Audio mutes</p>' +
         '<div class="mwf-row mwf-checks">' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-blasphemy" /> Blasphemy</label>' +
-        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p1" /> Profanity T1</label>' +
-        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p2" /> Profanity T2</label>' +
-        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p3" /> Profanity T3</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p1" /> Mild</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p2" /> Moderate</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p3" /> Strong</label>' +
         "</div>" +
         '<p class="mwf-sublabel">Scenes (skip / block)</p>' +
         '<div class="mwf-view-list"></div>' +
-        '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account (synced across devices). Skip jumps the span; Block covers with boxes. If Skip is chosen but only a block exists, block is used.</p>';
+        '<p class="mwf-hint">These choices apply to <strong>all</strong> movies &amp; shows for your Jellyfin account. Mild / Moderate / Strong are profanity levels. Skip jumps the span; Block covers with boxes.</p>' +
+        "</div>";
 
       var mountParent =
         anchor.closest(".selectContainer, .inputContainer, .mediaInfoItem") || anchor.parentElement;
@@ -1036,6 +1226,9 @@
         anchor.insertAdjacentElement("afterend", panel);
       }
 
+      panel.querySelector(".mwf-edit-toggle").addEventListener("click", function () {
+        setDetailsOptionsOpen(!state.detailsOptionsOpen);
+      });
       var chk = panel.querySelector("input.mwf-filter-toggle");
       chk.addEventListener("change", function () {
         writeEnabled(chk.checked);
@@ -1055,7 +1248,9 @@
 
       state.detailsMountedFor = itemId;
       state.viewLabelsKey = "";
+      if (state.detailsOptionsOpen === undefined) state.detailsOptionsOpen = false;
       syncUiControls();
+      setDetailsOptionsOpen(!!state.detailsOptionsOpen);
 
       if (itemId) {
         if (itemId !== state.itemId) {
@@ -1064,6 +1259,7 @@
         }
         ensureMutes(itemId, false).then(function () {
           refreshDetailsViewLabels(true);
+          refreshDetailsSummary();
         });
       }
     } catch (err) {
