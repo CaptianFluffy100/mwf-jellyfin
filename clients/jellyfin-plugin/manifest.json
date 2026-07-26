@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.19.0",
+        "changelog": "Fix browser playback stuck on load: defer Web Audio gain graph until after settle / first mute.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-19/jellyfin-plugin-mediawordfilter_1.0.19.0.zip",
+        "checksum": "bc966a33037fa1c69023bdfc9a553a5a",
+        "timestamp": "2026-07-26T17:00:00Z"
+      },
+      {
         "version": "1.0.18.0",
         "changelog": "Fix prefs save/load: ApiClient auth (no Invalid token), Newtonsoft camelCase, clearer logs.",
         "targetAbi": "10.11.0.0",

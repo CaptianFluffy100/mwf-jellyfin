@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.18.0";
+  var CLIENT_VERSION = "1.0.19.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -1122,6 +1122,12 @@
       return state.audioGraph;
     }
 
+    // Never attach during startup — createMediaElementSource mid-load stalls
+    // Chromium/Jellyfin Web playback. Native apps are unaffected (no this script).
+    if (!state.playbackSettled || video.readyState < MIN_READY || video.paused) {
+      return null;
+    }
+
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) {
       warnOnce("no-audio-ctx", "Web Audio API unavailable; cannot gain-mute");
@@ -1140,7 +1146,7 @@
       video[GRAPH_KEY] = graph;
       state.audioGraph = graph;
       resumeAudioContext(ctx);
-      log("audio gain graph attached");
+      log("audio gain graph attached (lazy, after settle)");
       return graph;
     } catch (err) {
       warnOnce(
@@ -1178,12 +1184,15 @@
       return;
     }
 
-    var graph = ensureAudioGraph(video);
-    if (!graph || !graph.gain) return;
-
-    resumeAudioContext(graph.ctx);
-
+    // Lazy graph: only create when we actually need to mute. Creating it on
+    // every tick / canplay was freezing browser playback at load.
     if (shouldMute) {
+      if (!state.playbackSettled || video.readyState < MIN_READY) return;
+      var graph = ensureAudioGraph(video);
+      if (!graph || !graph.gain) return;
+
+      resumeAudioContext(graph.ctx);
+
       if (!state.weMuted) {
         var cur = Number(graph.gain.gain.value);
         state.savedGain = Number.isFinite(cur) && cur > 0 ? cur : 1;
@@ -1191,9 +1200,12 @@
       }
       setGainValue(graph, 0);
     } else if (state.weMuted) {
-      var restore = Number(state.savedGain);
-      if (!Number.isFinite(restore) || restore <= 0) restore = 1;
-      setGainValue(graph, restore);
+      var existing = state.audioGraph || video[GRAPH_KEY] || null;
+      if (existing && existing.gain) {
+        var restore = Number(state.savedGain);
+        if (!Number.isFinite(restore) || restore <= 0) restore = 1;
+        setGainValue(existing, restore);
+      }
       state.weMuted = false;
     }
   }
@@ -1362,15 +1374,14 @@
       clearBlockOverlay();
     };
     var onPlaying = function () {
-      // Attach gain graph early so the first mute range does not hitch.
-      ensureAudioGraph(video);
+      // Do NOT attach Web Audio here — that stalls browser load. Graph is lazy.
       schedulePlaybackSettle();
     };
     video.addEventListener("waiting", onBusy);
     video.addEventListener("seeking", onBusy);
     video.addEventListener("stalled", onBusy);
     video.addEventListener("playing", onPlaying);
-    video.addEventListener("canplay", onPlaying);
+    // canplay fires during buffering — do not treat as settled / do not touch audio.
     state._videoLifecycle = { onBusy: onBusy, onPlaying: onPlaying };
   }
 
@@ -1383,7 +1394,6 @@
         video.removeEventListener("seeking", handlers.onBusy);
         video.removeEventListener("stalled", handlers.onBusy);
         video.removeEventListener("playing", handlers.onPlaying);
-        video.removeEventListener("canplay", handlers.onPlaying);
       } catch (_) {}
     }
     state.hookedVideo = null;
