@@ -1,11 +1,11 @@
-/* Media Word Filter — details-page styles only (never touches playback OSD). */
+/* Media Word Filter — details-page + playback block overlay (never touches OSD). */
 
 .mwf-details-panel {
   margin: 0.75rem 0 1rem;
   padding: 0.65rem 0.75rem;
   border-radius: 0.35rem;
   background: rgba(0, 0, 0, 0.28);
-  max-width: 28rem;
+  max-width: 32rem;
 }
 
 .mwf-details-panel .mwf-row {
@@ -23,14 +23,48 @@
   margin: 0;
 }
 
+.mwf-details-panel .mwf-sublabel {
+  margin: 0.75rem 0 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.mwf-details-panel .mwf-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.65;
+  line-height: 1.35;
+}
+
+.mwf-details-panel .mwf-checks {
+  gap: 0.35rem 0.85rem;
+}
+
+.mwf-details-panel .mwf-view-row {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mwf-details-panel .mwf-matched {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
 .mwf-details-panel select {
-  min-width: 10rem;
+  min-width: 7.5rem;
   max-width: 100%;
   padding: 0.3rem 0.45rem;
   border-radius: 0.25rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: #2b2b2b;
   color: inherit;
+}
+
+.mwf-details-panel select.mwf-profile-select {
+  min-width: 10rem;
 }
 
 .mwf-toggle {
@@ -40,4 +74,25 @@
   font-size: 0.9rem;
   cursor: pointer;
   user-select: none;
+}
+
+/* Cover boxes during playback */
+.mwf-block-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.mwf-block-rect {
+  position: absolute;
+  background: #000;
+  border: 0;
+  box-sizing: border-box;
+  transition:
+    left 0.08s linear,
+    top 0.08s linear,
+    width 0.08s linear,
+    height 0.08s linear;
 }

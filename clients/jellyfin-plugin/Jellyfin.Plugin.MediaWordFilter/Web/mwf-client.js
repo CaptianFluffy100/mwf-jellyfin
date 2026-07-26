@@ -1,6 +1,7 @@
 /**
  * Media Word Filter — Jellyfin Web client (server plugin).
- * Mute via video.muted; profile/filter UI only on the details page.
+ * Audio mute uses HTML5 video.muted (full mute, not volume ducking).
+ * Details-page prefs control blasphemy / profanity tiers / view skip|block|off.
  * Does NOT touch the playback OSD / media bar.
  */
 (function () {
@@ -14,6 +15,7 @@
 
   var LS_ENABLED = "mwfFilterEnabled";
   var LS_PROFILE = "mwfProfileUserId";
+  var LS_PREFS = "mwfFilterPrefs.v2";
   var POLL_MS = 100;
 
   var HEX = "[0-9a-fA-F]";
@@ -56,16 +58,19 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.11.0";
+  var CLIENT_VERSION = "1.0.12.0";
 
   var state = {
     enabled: readEnabled(),
+    prefs: readPrefs(),
     profileUserId: readProfile(),
     profiles: [],
     profilesLoaded: false,
     itemId: null,
     itemIdSource: null,
     mutes: [],
+    viewFilter: { block: [], skip: [] },
+    muteDoc: null,
     muteKey: null,
     weMuted: false,
     userWasMuted: false,
@@ -75,7 +80,9 @@
     detailsMountedFor: null,
     playbackHooksAttached: false,
     warnOnceKeys: Object.create(null),
-    lastTickDiag: null
+    lastTickDiag: null,
+    lastSkipId: null,
+    overlayHost: null
   };
 
   function log() {
@@ -108,8 +115,67 @@
       localStorage.setItem(LS_ENABLED, state.enabled ? "1" : "0");
     } catch (_) {}
     syncUiControls();
-    state.muteKey = null;
+    rebuildFromCachedDoc();
     ensureMutes(state.itemId, true);
+  }
+
+  function defaultPrefs() {
+    return {
+      blasphemy: true,
+      profanity1: true,
+      profanity2: true,
+      profanity3: true,
+      // matched label -> "skip" | "block" | "off"
+      viewMatched: {}
+    };
+  }
+
+  function readPrefs() {
+    try {
+      var raw = localStorage.getItem(LS_PREFS);
+      if (!raw) return defaultPrefs();
+      var parsed = JSON.parse(raw);
+      var d = defaultPrefs();
+      if (!parsed || typeof parsed !== "object") return d;
+      d.blasphemy = parsed.blasphemy !== false;
+      d.profanity1 = parsed.profanity1 !== false;
+      d.profanity2 = parsed.profanity2 !== false;
+      d.profanity3 = parsed.profanity3 !== false;
+      d.viewMatched =
+        parsed.viewMatched && typeof parsed.viewMatched === "object"
+          ? parsed.viewMatched
+          : {};
+      return d;
+    } catch (_) {
+      return defaultPrefs();
+    }
+  }
+
+  function writePrefs(partial) {
+    var next = Object.assign({}, state.prefs, partial || {});
+    if (partial && Object.prototype.hasOwnProperty.call(partial, "viewMatched")) {
+      next.viewMatched = partial.viewMatched || {};
+    }
+    state.prefs = next;
+    try {
+      localStorage.setItem(LS_PREFS, JSON.stringify(state.prefs));
+    } catch (_) {}
+    syncUiControls();
+    rebuildFromCachedDoc();
+    refreshDetailsViewLabels();
+  }
+
+  function setViewMatchedAction(matched, action) {
+    var map = Object.assign({}, state.prefs.viewMatched || {});
+    if (!action || action === "off") delete map[matched];
+    else map[matched] = action;
+    writePrefs({ viewMatched: map });
+  }
+
+  function viewActionFor(matched) {
+    var a = (state.prefs.viewMatched || {})[matched];
+    if (a === "skip" || a === "block") return a;
+    return "off";
   }
 
   function readProfile() {
@@ -167,17 +233,98 @@
     return false;
   }
 
-  function parseMuteDocument(data) {
-    var list = data && Array.isArray(data.mutes) ? data.mutes : [];
+  function parseMuteDocument(data, prefs) {
+    prefs = prefs || state.prefs || defaultPrefs();
+
+    function pushRanges(list, out) {
+      if (!Array.isArray(list)) return;
+      for (var i = 0; i < list.length; i++) {
+        var start_ms = Number(list[i].start_ms);
+        var end_ms = Number(list[i].end_ms);
+        if (Number.isFinite(start_ms) && Number.isFinite(end_ms)) {
+          out.push({ start_ms: start_ms, end_ms: end_ms });
+        }
+      }
+    }
+
     var mutes = [];
-    for (var i = 0; i < list.length; i++) {
-      var start_ms = Number(list[i].start_ms);
-      var end_ms = Number(list[i].end_ms);
-      if (Number.isFinite(start_ms) && Number.isFinite(end_ms)) {
-        mutes.push({ start_ms: start_ms, end_ms: end_ms });
+    var raw = data && data.mutes;
+
+    // Legacy mute.v1: flat array
+    if (Array.isArray(raw)) {
+      pushRanges(raw, mutes);
+      return mutes;
+    }
+
+    // mute.v2 buckets — each category/tier is independently selectable
+    if (raw && typeof raw === "object") {
+      if (prefs.blasphemy !== false) pushRanges(raw.blasphemy, mutes);
+      if (raw.profanity && typeof raw.profanity === "object") {
+        if (prefs.profanity1 !== false) {
+          pushRanges(raw.profanity["1"] || raw.profanity.tier1, mutes);
+        }
+        if (prefs.profanity2 !== false) {
+          pushRanges(raw.profanity["2"] || raw.profanity.tier2, mutes);
+        }
+        if (prefs.profanity3 !== false) {
+          pushRanges(raw.profanity["3"] || raw.profanity.tier3, mutes);
+        }
       }
     }
     return mutes;
+  }
+
+  function parseViewFilter(data) {
+    var vf = (data && data.view_filter) || {};
+    return {
+      block: Array.isArray(vf.block) ? vf.block : [],
+      skip: Array.isArray(vf.skip) ? vf.skip : []
+    };
+  }
+
+  function collectMatchedLabels(viewFilter) {
+    var set = {};
+    var lists = [viewFilter.block || [], viewFilter.skip || []];
+    for (var i = 0; i < lists.length; i++) {
+      for (var j = 0; j < lists[i].length; j++) {
+        var m = (lists[i][j].matched || "").trim();
+        if (m) set[m] = true;
+      }
+    }
+    return Object.keys(set).sort();
+  }
+
+  function rebuildFromCachedDoc() {
+    if (!state.muteDoc) {
+      state.mutes = [];
+      state.viewFilter = { block: [], skip: [] };
+      clearBlockOverlay();
+      return;
+    }
+    if (!state.enabled) {
+      state.mutes = [];
+      state.viewFilter = { block: [], skip: [] };
+      clearBlockOverlay();
+      if (state.weMuted) applyMute(state.video, false);
+      return;
+    }
+    state.mutes = parseMuteDocument(state.muteDoc, state.prefs);
+    state.viewFilter = parseViewFilter(state.muteDoc);
+  }
+
+  function applyDocToState(doc, itemId) {
+    state.muteDoc = doc || null;
+    rebuildFromCachedDoc();
+    log(
+      "loaded",
+      state.mutes.length,
+      "audio mutes,",
+      (state.viewFilter.block || []).length,
+      "blocks,",
+      (state.viewFilter.skip || []).length,
+      "skips for",
+      itemId
+    );
   }
 
   function playbackMs(video) {
@@ -505,22 +652,27 @@
   function ensureMutes(itemId, force) {
     if (!itemId) {
       state.mutes = [];
+      state.viewFilter = { block: [], skip: [] };
+      state.muteDoc = null;
       state.muteKey = null;
+      clearBlockOverlay();
       return Promise.resolve([]);
     }
     if (!state.enabled) {
       state.mutes = [];
+      state.viewFilter = { block: [], skip: [] };
       state.muteKey = cacheKey(itemId) + "|off";
+      clearBlockOverlay();
       return Promise.resolve([]);
     }
 
     var key = cacheKey(itemId);
     if (!force && state.muteKey === key && state.cache[key]) {
-      state.mutes = state.cache[key].mutes;
+      applyDocToState(state.cache[key].doc, itemId);
       return Promise.resolve(state.mutes);
     }
     if (state.cache[key] && !force) {
-      state.mutes = state.cache[key].mutes;
+      applyDocToState(state.cache[key].doc, itemId);
       state.muteKey = key;
       return Promise.resolve(state.mutes);
     }
@@ -540,18 +692,17 @@
 
     var p = fetchJson(path)
       .then(function (doc) {
-        var mutes = doc ? parseMuteDocument(doc) : [];
-        state.cache[key] = { mutes: mutes, fetchedAt: Date.now() };
-        state.mutes = mutes;
+        state.cache[key] = { doc: doc, fetchedAt: Date.now() };
+        applyDocToState(doc, itemId);
         state.muteKey = key;
         delete state.warnOnceKeys["auth-401:" + path];
-        log("loaded", mutes.length, "mutes for", itemId);
-        if (mutes.length === 0) {
+        if (state.mutes.length === 0 && !(state.viewFilter.block || []).length && !(state.viewFilter.skip || []).length) {
           warnOnce("empty-mutes:" + key, "mute API returned 0 ranges for item " + shortId(itemId));
         } else {
           delete state.warnOnceKeys["empty-mutes:" + key];
         }
-        return mutes;
+        refreshDetailsViewLabels();
+        return state.mutes;
       })
       .catch(function (err) {
         warnOnce("fetch-fail:" + key, "mute fetch failed for item " + shortId(itemId), err);
@@ -631,7 +782,78 @@
       document.querySelectorAll("input.mwf-filter-toggle").forEach(function (el) {
         el.checked = !!state.enabled;
       });
+      var p = state.prefs || defaultPrefs();
+      document.querySelectorAll("input.mwf-pref-blasphemy").forEach(function (el) {
+        el.checked = p.blasphemy !== false;
+      });
+      document.querySelectorAll("input.mwf-pref-p1").forEach(function (el) {
+        el.checked = p.profanity1 !== false;
+      });
+      document.querySelectorAll("input.mwf-pref-p2").forEach(function (el) {
+        el.checked = p.profanity2 !== false;
+      });
+      document.querySelectorAll("input.mwf-pref-p3").forEach(function (el) {
+        el.checked = p.profanity3 !== false;
+      });
+      refreshDetailsViewLabels();
     } catch (_) {}
+  }
+
+  function refreshDetailsViewLabels() {
+    var host = document.querySelector("#mwf-details-panel .mwf-view-list");
+    if (!host) return;
+    var labels = collectMatchedLabels(state.viewFilter || { block: [], skip: [] });
+    if (!labels.length && state.muteDoc) {
+      labels = collectMatchedLabels(parseViewFilter(state.muteDoc));
+    }
+    if (!labels.length) {
+      host.innerHTML =
+        '<p class="mwf-hint">No skip/block scenes for this item yet.</p>';
+      return;
+    }
+    host.innerHTML = labels
+      .map(function (label) {
+        var cur = viewActionFor(label);
+        return (
+          '<div class="mwf-row mwf-view-row">' +
+          '<span class="mwf-matched">' +
+          escapeHtml(label) +
+          "</span>" +
+          '<select class="mwf-view-action" data-matched="' +
+          escapeAttr(label) +
+          '" aria-label="Action for ' +
+          escapeAttr(label) +
+          '">' +
+          '<option value="off"' +
+          (cur === "off" ? " selected" : "") +
+          ">Off</option>" +
+          '<option value="block"' +
+          (cur === "block" ? " selected" : "") +
+          ">Block</option>" +
+          '<option value="skip"' +
+          (cur === "skip" ? " selected" : "") +
+          ">Skip</option>" +
+          "</select></div>"
+        );
+      })
+      .join("");
+    host.querySelectorAll("select.mwf-view-action").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        setViewMatchedAction(sel.getAttribute("data-matched"), sel.value);
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/'/g, "&#39;");
   }
 
   function isDetailsHash() {
@@ -666,7 +888,10 @@
       if (!anchor) return;
 
       var existing = document.getElementById("mwf-details-panel");
-      if (existing && state.detailsMountedFor === itemId) return;
+      if (existing && state.detailsMountedFor === itemId) {
+        refreshDetailsViewLabels();
+        return;
+      }
 
       if (existing) existing.remove();
 
@@ -681,7 +906,17 @@
         "</div>" +
         '<div class="mwf-row">' +
         '<label class="mwf-toggle"><input type="checkbox" class="mwf-filter-toggle" /> Use filter</label>' +
-        "</div>";
+        "</div>" +
+        '<p class="mwf-sublabel">Audio mutes</p>' +
+        '<div class="mwf-row mwf-checks">' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-blasphemy" /> Blasphemy</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p1" /> Profanity T1</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p2" /> Profanity T2</label>' +
+        '<label class="mwf-toggle"><input type="checkbox" class="mwf-pref-p3" /> Profanity T3</label>' +
+        "</div>" +
+        '<p class="mwf-sublabel">Scenes (skip / block)</p>' +
+        '<div class="mwf-view-list"></div>' +
+        '<p class="mwf-hint">Skip jumps the span. Block covers with boxes. If Skip is chosen but only a block exists, block is used.</p>';
 
       var mountParent =
         anchor.closest(".selectContainer, .inputContainer, .mediaInfoItem") || anchor.parentElement;
@@ -699,11 +934,23 @@
       chk.addEventListener("change", function () {
         writeEnabled(chk.checked);
       });
+      panel.querySelector(".mwf-pref-blasphemy").addEventListener("change", function (e) {
+        writePrefs({ blasphemy: e.target.checked });
+      });
+      panel.querySelector(".mwf-pref-p1").addEventListener("change", function (e) {
+        writePrefs({ profanity1: e.target.checked });
+      });
+      panel.querySelector(".mwf-pref-p2").addEventListener("change", function (e) {
+        writePrefs({ profanity2: e.target.checked });
+      });
+      panel.querySelector(".mwf-pref-p3").addEventListener("change", function (e) {
+        writePrefs({ profanity3: e.target.checked });
+      });
 
       state.detailsMountedFor = itemId;
       loadProfiles().then(function () {
         fillProfileSelect(sel);
-        chk.checked = !!state.enabled;
+        syncUiControls();
       });
 
       if (itemId) {
@@ -711,7 +958,9 @@
           state.itemId = itemId;
           state.itemIdSource = "details";
         }
-        ensureMutes(itemId, false);
+        ensureMutes(itemId, false).then(function () {
+          refreshDetailsViewLabels();
+        });
       }
     } catch (err) {
       log("mountDetailsPanel error", err);
@@ -778,6 +1027,234 @@
     }
   }
 
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function smoothstep(t) {
+    var x = Math.min(1, Math.max(0, t));
+    return x * x * (3 - 2 * x);
+  }
+
+  function sampleTrack(keyframes, relMs) {
+    if (!keyframes || !keyframes.length) return null;
+    var sorted = keyframes.slice().sort(function (a, b) {
+      return a.time_ms - b.time_ms;
+    });
+    if (relMs <= sorted[0].time_ms) {
+      return {
+        id: sorted[0].id,
+        rec_center: sorted[0].rec_center,
+        rec_size: sorted[0].rec_size
+      };
+    }
+    var last = sorted[sorted.length - 1];
+    if (relMs >= last.time_ms) {
+      return { id: last.id, rec_center: last.rec_center, rec_size: last.rec_size };
+    }
+    for (var i = 0; i < sorted.length - 1; i++) {
+      var a = sorted[i];
+      var b = sorted[i + 1];
+      if (relMs >= a.time_ms && relMs <= b.time_ms) {
+        var t = smoothstep((relMs - a.time_ms) / Math.max(1, b.time_ms - a.time_ms));
+        return {
+          id: a.id,
+          rec_center: {
+            x: lerp(a.rec_center.x, b.rec_center.x, t),
+            y: lerp(a.rec_center.y, b.rec_center.y, t)
+          },
+          rec_size: {
+            w: lerp(a.rec_size.w, b.rec_size.w, t),
+            h: lerp(a.rec_size.h, b.rec_size.h, t)
+          }
+        };
+      }
+    }
+    return null;
+  }
+
+  function activeScenesAt(tMs) {
+    var vf = state.viewFilter || { block: [], skip: [] };
+    var skips = [];
+    var blocks = [];
+    var i;
+    for (i = 0; i < (vf.skip || []).length; i++) {
+      var s = vf.skip[i];
+      if (tMs >= s.start_ms && tMs < s.end_ms) skips.push(s);
+    }
+    for (i = 0; i < (vf.block || []).length; i++) {
+      var b = vf.block[i];
+      if (tMs >= b.start_ms && tMs < b.end_ms) blocks.push(b);
+    }
+    return { skips: skips, blocks: blocks };
+  }
+
+  /**
+   * Resolve skip/block from prefs.
+   * skip preferred when chosen; if no skip exists for that matched, fall back to block.
+   */
+  function resolveViewActions(tMs) {
+    var active = activeScenesAt(tMs);
+    var skipScene = null;
+    var blockScenes = [];
+    var seenBlock = {};
+
+    function want(matched) {
+      return viewActionFor(matched || "");
+    }
+
+    var i;
+    for (i = 0; i < active.skips.length; i++) {
+      if (want(active.skips[i].matched) === "skip") {
+        skipScene = active.skips[i];
+        break;
+      }
+    }
+
+    for (i = 0; i < active.blocks.length; i++) {
+      var sc = active.blocks[i];
+      var action = want(sc.matched);
+      if (action === "block") {
+        blockScenes.push(sc);
+        seenBlock[sc.id] = true;
+      } else if (action === "skip") {
+        // User asked to skip this matched label; only block if no skip scene covers it.
+        var hasSkip = false;
+        for (var j = 0; j < active.skips.length; j++) {
+          if (
+            active.skips[j].matched === sc.matched &&
+            tMs >= active.skips[j].start_ms &&
+            tMs < active.skips[j].end_ms
+          ) {
+            hasSkip = true;
+            break;
+          }
+        }
+        if (!hasSkip && !seenBlock[sc.id]) {
+          blockScenes.push(sc);
+          seenBlock[sc.id] = true;
+        }
+      }
+    }
+
+    // If skip was requested for a matched that only has skip (no block), skipScene already set.
+    // If skip requested for matched that only has block, blockScenes got it above.
+    // Also: skip action with skip scene present — don't also show blocks for same matched.
+    if (skipScene) {
+      blockScenes = blockScenes.filter(function (sc) {
+        return sc.matched !== skipScene.matched;
+      });
+    }
+
+    return { skip: skipScene, blocks: blockScenes };
+  }
+
+  function ensureOverlayHost(video) {
+    if (!video) {
+      clearBlockOverlay();
+      return null;
+    }
+    var parent = video.parentElement;
+    if (!parent) return null;
+    if (getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+    var host = state.overlayHost;
+    if (!host || !host.isConnected || host.parentElement !== parent) {
+      if (host && host.parentElement) host.remove();
+      host = document.createElement("div");
+      host.className = "mwf-block-overlay";
+      host.setAttribute("aria-hidden", "true");
+      parent.appendChild(host);
+      state.overlayHost = host;
+    }
+    return host;
+  }
+
+  function clearBlockOverlay() {
+    if (state.overlayHost) {
+      try {
+        state.overlayHost.remove();
+      } catch (_) {}
+      state.overlayHost = null;
+    }
+  }
+
+  function renderBlockOverlay(video, blockScenes, tMs) {
+    if (!blockScenes || !blockScenes.length) {
+      clearBlockOverlay();
+      return;
+    }
+    var host = ensureOverlayHost(video);
+    if (!host) return;
+
+    var samples = [];
+    for (var i = 0; i < blockScenes.length; i++) {
+      var scene = blockScenes[i];
+      var rel = tMs - scene.start_ms;
+      var byId = {};
+      var kfs = scene.blocks || [];
+      for (var k = 0; k < kfs.length; k++) {
+        var id = kfs[k].id || "legacy";
+        if (!byId[id]) byId[id] = [];
+        byId[id].push(kfs[k]);
+      }
+      Object.keys(byId).forEach(function (id) {
+        var sample = sampleTrack(byId[id], rel);
+        if (sample) samples.push(sample);
+      });
+    }
+
+    var existing = {};
+    host.querySelectorAll(".mwf-block-rect").forEach(function (el) {
+      existing[el.dataset.blockId] = el;
+    });
+    var keep = {};
+    for (var s = 0; s < samples.length; s++) {
+      var sample = samples[s];
+      keep[sample.id] = true;
+      var el = existing[sample.id];
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "mwf-block-rect";
+        el.dataset.blockId = sample.id;
+        host.appendChild(el);
+      }
+      el.style.left = sample.rec_center.x - sample.rec_size.w / 2 + "%";
+      el.style.top = sample.rec_center.y - sample.rec_size.h / 2 + "%";
+      el.style.width = sample.rec_size.w + "%";
+      el.style.height = sample.rec_size.h + "%";
+    }
+    Object.keys(existing).forEach(function (id) {
+      if (!keep[id]) existing[id].remove();
+    });
+  }
+
+  function applyViewFilter(video, tMs) {
+    if (!video || !state.enabled) {
+      clearBlockOverlay();
+      state.lastSkipId = null;
+      return;
+    }
+    var resolved = resolveViewActions(tMs);
+    if (resolved.skip) {
+      if (state.lastSkipId !== resolved.skip.id) {
+        state.lastSkipId = resolved.skip.id;
+        var endSec = Number(resolved.skip.end_ms) / 1000;
+        if (Number.isFinite(endSec)) {
+          log("skip to", endSec, resolved.skip.matched);
+          try {
+            video.currentTime = endSec;
+          } catch (_) {}
+        }
+      }
+      clearBlockOverlay();
+      return;
+    }
+    state.lastSkipId = null;
+    renderBlockOverlay(video, resolved.blocks, tMs);
+  }
+
   function tickDiagnostics(video) {
     if (!state.enabled) return;
     var diag = !video
@@ -803,25 +1280,35 @@
   function tick(forceRefresh) {
     try {
       var video = findVideo();
+      state.video = video;
       refreshPlaybackItem(video, !!forceRefresh);
 
       if (!state.enabled) {
         if (state.weMuted) applyMute(video, false);
+        clearBlockOverlay();
+        state.lastSkipId = null;
         tickDiagnostics(video);
         return;
       }
 
-      if (video && state.itemId && (!state.mutes || !state.mutes.length) && !state.fetchPending[cacheKey(state.itemId)]) {
+      if (video && state.itemId && !state.muteDoc && !state.fetchPending[cacheKey(state.itemId)]) {
         ensureMutes(state.itemId, false);
       }
 
-      if (!video || !state.mutes || !state.mutes.length) {
+      var tMs = playbackMs(video);
+      var hasAudio = state.mutes && state.mutes.length;
+      var hasView =
+        ((state.viewFilter.block || []).length || (state.viewFilter.skip || []).length) > 0;
+
+      if (!video || (!hasAudio && !hasView && !state.muteDoc)) {
         if (state.weMuted) applyMute(video, false);
+        clearBlockOverlay();
         tickDiagnostics(video);
         return;
       }
 
-      applyMute(video, inMuteRange(playbackMs(video), state.mutes));
+      applyMute(video, hasAudio && inMuteRange(tMs, state.mutes));
+      applyViewFilter(video, tMs);
       tickDiagnostics(video);
     } catch (err) {
       warnOnce("tick-error", "tick error", err);
@@ -858,11 +1345,15 @@
       });
       Events.on(pm, "playbackstop", function () {
         if (state.weMuted && state.video) applyMute(state.video, false);
+        clearBlockOverlay();
+        state.lastSkipId = null;
         if (!findVideo()) {
           state.video = null;
           state.itemId = null;
           state.itemIdSource = null;
           state.mutes = [];
+          state.viewFilter = { block: [], skip: [] };
+          state.muteDoc = null;
           state.muteKey = null;
         }
       });

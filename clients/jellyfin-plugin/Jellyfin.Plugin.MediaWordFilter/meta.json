@@ -1,13 +1,13 @@
 {
   "guid": "a8e3f2c1-9b4d-4e7a-8f1c-2d6b5a9e0c34",
   "name": "Media Word Filter",
-  "description": "Media Word Filter companion for Jellyfin. Dashboard config, mute/profile proxy, and reliable jellyfin-web client inject via middleware + File Transformation.",
-  "overview": "Details-page profile/filter UI, mute loop, and /MediaWordFilter proxy. Injects client script at request time (IStartupFilter) with File Transformation as backup.",
+  "description": "Media Word Filter companion for Jellyfin Web. mute.v2 audio tiers + view skip/block with details-page prefs.",
+  "overview": "Details-page filter prefs (blasphemy, profanity T1–T3, per-label skip/block). Audio uses video.muted; view_filter skip seeks and block draws overlays.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.11.0",
-  "changelog": "Fix FT payload extraction and HTML detection, add IStartupFilter middleware inject, improve mute auth/HLS playback.",
+  "version": "1.0.12.0",
+  "changelog": "mute.v2 support: details prefs for blasphemy/profanity tiers and per-matched skip/block/off; playback skip seek + block overlays.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-23T23:30:00Z"
+  "timestamp": "2026-07-26T13:00:00Z"
 }
