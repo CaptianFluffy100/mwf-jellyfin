@@ -1,6 +1,6 @@
 /**
  * Media Word Filter — Jellyfin Web client (server plugin).
- * Audio mute ducks HTML5 video.volume (not video.muted — that flashes Chromium's mute icon).
+ * Audio mute uses Web Audio GainNode (gain 0 / restore) — avoids Chromium mute/volume icons.
  * Details-page prefs control blasphemy / profanity tiers / view skip|block|off.
  * Does NOT touch the playback OSD / media bar.
  */
@@ -57,10 +57,11 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.15.0";
+  var CLIENT_VERSION = "1.0.16.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
+  var GRAPH_KEY = "__mwfAudioGraph";
 
   var state = {
     enabled: readEnabled(),
@@ -72,8 +73,8 @@
     muteDoc: null,
     muteKey: null,
     weMuted: false,
-    userWasMuted: false,
-    savedVolume: 1,
+    savedGain: 1,
+    audioGraph: null,
     video: null,
     cache: Object.create(null),
     fetchPending: Object.create(null),
@@ -951,28 +952,96 @@
       });
   }
 
+  function resumeAudioContext(ctx) {
+    if (!ctx) return;
+    try {
+      if (ctx.state === "suspended") {
+        var p = ctx.resume();
+        if (p && typeof p.catch === "function") p.catch(function () {});
+      }
+    } catch (_) {}
+  }
+
+  function ensureAudioGraph(video) {
+    if (!video) return null;
+    if (video[GRAPH_KEY] && video[GRAPH_KEY].gain) {
+      state.audioGraph = video[GRAPH_KEY];
+      resumeAudioContext(state.audioGraph.ctx);
+      return state.audioGraph;
+    }
+
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) {
+      warnOnce("no-audio-ctx", "Web Audio API unavailable; cannot gain-mute");
+      return null;
+    }
+
+    try {
+      var ctx = new AC();
+      // createMediaElementSource may only be called once per element.
+      var source = ctx.createMediaElementSource(video);
+      var gain = ctx.createGain();
+      gain.gain.value = 1;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      var graph = { video: video, ctx: ctx, source: source, gain: gain };
+      video[GRAPH_KEY] = graph;
+      state.audioGraph = graph;
+      resumeAudioContext(ctx);
+      log("audio gain graph attached");
+      return graph;
+    } catch (err) {
+      warnOnce(
+        "audio-graph-fail",
+        "could not attach Web Audio gain graph (element may already have a source node)",
+        err
+      );
+      return null;
+    }
+  }
+
+  function setGainValue(graph, value) {
+    if (!graph || !graph.gain) return;
+    var gainParam = graph.gain.gain;
+    var v = Number(value);
+    if (!Number.isFinite(v)) v = 1;
+    try {
+      var t = graph.ctx && typeof graph.ctx.currentTime === "number" ? graph.ctx.currentTime : 0;
+      if (typeof gainParam.cancelScheduledValues === "function") {
+        gainParam.cancelScheduledValues(t);
+        gainParam.setValueAtTime(v, t);
+      } else {
+        gainParam.value = v;
+      }
+    } catch (_) {
+      try {
+        gainParam.value = v;
+      } catch (__) {}
+    }
+  }
+
   function applyMute(video, shouldMute) {
     if (!video) {
       if (!shouldMute) state.weMuted = false;
       return;
     }
-    // Use volume ducking instead of video.muted. Toggling .muted makes Chromium
-    // flash its built-in HTML5 mute/volume icon over the player.
+
+    var graph = ensureAudioGraph(video);
+    if (!graph || !graph.gain) return;
+
+    resumeAudioContext(graph.ctx);
+
     if (shouldMute) {
       if (!state.weMuted) {
-        state.userWasMuted = !!video.muted;
-        var vol = Number(video.volume);
-        state.savedVolume = Number.isFinite(vol) && vol > 0 ? vol : 1;
+        var cur = Number(graph.gain.gain.value);
+        state.savedGain = Number.isFinite(cur) && cur > 0 ? cur : 1;
         state.weMuted = true;
       }
-      if (state.userWasMuted) return;
-      if (video.volume !== 0) video.volume = 0;
+      setGainValue(graph, 0);
     } else if (state.weMuted) {
-      if (!state.userWasMuted) {
-        var restore = Number(state.savedVolume);
-        if (!Number.isFinite(restore) || restore <= 0) restore = 1;
-        if (video.volume !== restore) video.volume = restore;
-      }
+      var restore = Number(state.savedGain);
+      if (!Number.isFinite(restore) || restore <= 0) restore = 1;
+      setGainValue(graph, restore);
       state.weMuted = false;
     }
   }
@@ -1141,6 +1210,8 @@
       clearBlockOverlay();
     };
     var onPlaying = function () {
+      // Attach gain graph early so the first mute range does not hitch.
+      ensureAudioGraph(video);
       schedulePlaybackSettle();
     };
     video.addEventListener("waiting", onBusy);
