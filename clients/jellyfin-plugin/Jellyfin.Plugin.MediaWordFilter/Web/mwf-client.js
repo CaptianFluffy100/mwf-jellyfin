@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.17.0";
+  var CLIENT_VERSION = "1.0.18.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -141,14 +141,22 @@
   function normalizePrefsObject(parsed) {
     var d = defaultPrefs();
     if (!parsed || typeof parsed !== "object") return d;
-    d.blasphemy = parsed.blasphemy !== false;
-    d.profanity1 = parsed.profanity1 !== false;
-    d.profanity2 = parsed.profanity2 !== false;
-    d.profanity3 = parsed.profanity3 !== false;
-    d.viewMatched =
-      parsed.viewMatched && typeof parsed.viewMatched === "object"
-        ? parsed.viewMatched
-        : {};
+    // Accept camelCase (client) and PascalCase (some Jellyfin serializers).
+    var blasphemy = parsed.blasphemy;
+    if (blasphemy === undefined) blasphemy = parsed.Blasphemy;
+    var p1 = parsed.profanity1;
+    if (p1 === undefined) p1 = parsed.Profanity1;
+    var p2 = parsed.profanity2;
+    if (p2 === undefined) p2 = parsed.Profanity2;
+    var p3 = parsed.profanity3;
+    if (p3 === undefined) p3 = parsed.Profanity3;
+    var vm = parsed.viewMatched;
+    if (vm === undefined) vm = parsed.ViewMatched;
+    d.blasphemy = blasphemy !== false;
+    d.profanity1 = p1 !== false;
+    d.profanity2 = p2 !== false;
+    d.profanity3 = p3 !== false;
+    d.viewMatched = vm && typeof vm === "object" ? vm : {};
     return d;
   }
 
@@ -186,11 +194,18 @@
       state.enabled = !!enabledOverride;
     } else if (doc && Object.prototype.hasOwnProperty.call(doc, "enabled")) {
       state.enabled = doc.enabled !== false;
+    } else if (doc && Object.prototype.hasOwnProperty.call(doc, "Enabled")) {
+      state.enabled = doc.Enabled !== false;
     }
     cachePrefsLocally();
     syncUiControls();
     rebuildFromCachedDoc();
     refreshDetailsViewLabels(false);
+  }
+
+  function prefsIsStored(doc) {
+    if (!doc) return false;
+    return doc.stored === true || doc.Stored === true;
   }
 
   function writePrefs(partial) {
@@ -218,6 +233,19 @@
   }
 
   function putJson(path, body) {
+    var c = apiClient();
+    // Prefer ApiClient.ajax — it attaches a valid Jellyfin token (avoids Invalid token).
+    if (c && typeof c.ajax === "function" && typeof c.getUrl === "function") {
+      return Promise.resolve(
+        c.ajax({
+          type: "PUT",
+          url: c.getUrl(path.replace(/^\//, "")),
+          data: JSON.stringify(body),
+          contentType: "application/json",
+          dataType: "json"
+        })
+      );
+    }
     return fetch(apiUrl(path), {
       method: "PUT",
       credentials: "same-origin",
@@ -228,7 +256,7 @@
       body: JSON.stringify(body)
     }).then(function (res) {
       if (res.status === 401) {
-        warnOnce("prefs-401", "prefs save returned 401 (not logged in?)");
+        console.warn("[mwf-plugin] prefs save returned 401");
         throw new Error("HTTP 401 unauthorized");
       }
       if (!res.ok) {
@@ -240,15 +268,25 @@
     });
   }
 
+  function getJson(path) {
+    var c = apiClient();
+    if (c && typeof c.getJSON === "function" && typeof c.getUrl === "function") {
+      return Promise.resolve(c.getJSON(c.getUrl(path.replace(/^\//, ""))));
+    }
+    return fetchJson(path);
+  }
+
   function savePrefsToServer() {
     if (!hasAuthToken()) return Promise.resolve();
     return putJson("MediaWordFilter/prefs", prefsPayload())
       .then(function () {
         state.prefsLoadedFromServer = true;
+        delete state.warnOnceKeys["prefs-save-fail"];
+        delete state.warnOnceKeys["prefs-401"];
         log("prefs saved to Jellyfin user");
       })
       .catch(function (err) {
-        warnOnce("prefs-save-fail", "could not save filter prefs to Jellyfin", err);
+        console.warn("[mwf-plugin] could not save filter prefs to Jellyfin", err);
       });
   }
 
@@ -256,11 +294,10 @@
     if (!hasAuthToken()) {
       return Promise.resolve(false);
     }
-    return fetchJson("MediaWordFilter/prefs")
+    return getJson("MediaWordFilter/prefs")
       .then(function (doc) {
         if (!doc) return false;
-        var stored = doc.stored === true;
-        if (!stored) {
+        if (!prefsIsStored(doc)) {
           // First time on server: push local browser prefs (migrate), then done.
           return savePrefsToServer().then(function () {
             state.prefsLoadedFromServer = true;
@@ -269,11 +306,12 @@
         }
         applyPrefsState(doc);
         state.prefsLoadedFromServer = true;
+        delete state.warnOnceKeys["prefs-load-fail"];
         log("prefs loaded from Jellyfin user");
         return true;
       })
       .catch(function (err) {
-        warnOnce("prefs-load-fail", "could not load filter prefs from Jellyfin; using local cache", err);
+        console.warn("[mwf-plugin] could not load filter prefs from Jellyfin; using local cache", err);
         return false;
       });
   }
@@ -490,15 +528,24 @@
     if (!tok && c && (c.accessToken || c._accessToken)) {
       tok = c.accessToken || c._accessToken;
     }
+    // Only fall back to stored credentials when ApiClient has no live token.
     if (!tok) tok = accessTokenFromCredentials();
     if (tok) {
+      // X-Emby-Token alone is enough. A hand-built Authorization header can
+      // make Jellyfin respond with "Invalid token."
       headers["X-Emby-Token"] = tok;
-      headers["Authorization"] = "MediaBrowser Token=" + tok + ", Client=\"Jellyfin Web\", Device=\"Browser\", DeviceId=\"mwf-plugin\", Version=\"" + CLIENT_VERSION + "\"";
     }
     return headers;
   }
 
   function hasAuthToken() {
+    var c = apiClient();
+    try {
+      if (c && typeof c.accessToken === "function" && c.accessToken()) return true;
+    } catch (_) {}
+    try {
+      if (c && typeof c.getAccessToken === "function" && c.getAccessToken()) return true;
+    } catch (_) {}
     return !!authHeaders()["X-Emby-Token"];
   }
 
@@ -1666,8 +1713,14 @@
       var prefsAttempts = 0;
       var prefsTimer = setInterval(function () {
         prefsAttempts++;
-        if (!hasAuthToken()) {
-          if (prefsAttempts >= 40) clearInterval(prefsTimer);
+        // Wait until ApiClient has a live token — credentials-only can be stale ("Invalid token").
+        var c = apiClient();
+        var live = false;
+        try {
+          live = !!(c && typeof c.accessToken === "function" && c.accessToken());
+        } catch (_) {}
+        if (!live) {
+          if (prefsAttempts >= 60) clearInterval(prefsTimer);
           return;
         }
         clearInterval(prefsTimer);

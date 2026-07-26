@@ -5,9 +5,9 @@
   "overview": "Per-user filter prefs synced via Jellyfin. Web Audio gain mute. Playback-safe overlays.",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.17.0",
-  "changelog": "Save filter prefs (blasphemy/profanity/scenes/enabled) per Jellyfin user on the server — syncs across devices and applies to all titles.",
+  "version": "1.0.18.0",
+  "changelog": "Fix prefs save/load: use ApiClient auth (no Invalid token), Newtonsoft camelCase binding, clearer server logs.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-26T16:30:00Z"
+  "timestamp": "2026-07-26T16:50:00Z"
 }

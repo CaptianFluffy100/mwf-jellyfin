@@ -156,11 +156,19 @@ public class MwfController : ControllerBase
         var userId = ResolveUserId();
         if (userId is null)
         {
-            return Unauthorized(new { error = "Authentication required" });
+            _logger.LogWarning(
+                "MWF prefs GET: authenticated but no user id in claims (claimTypes={ClaimTypes})",
+                string.Join(",", User.Claims.Select(c => c.Type)));
+            return Unauthorized(new { error = "Could not resolve Jellyfin user id" });
         }
 
         var prefs = _prefsStore.Get(userId.Value);
         prefs.Stored = _prefsStore.Exists(userId.Value);
+        _logger.LogInformation(
+            "MWF prefs GET for user {UserId}: stored={Stored}, blasphemy={Blasphemy}",
+            userId,
+            prefs.Stored,
+            prefs.Blasphemy);
         return Ok(prefs);
     }
 
@@ -176,11 +184,15 @@ public class MwfController : ControllerBase
         var userId = ResolveUserId();
         if (userId is null)
         {
-            return Unauthorized(new { error = "Authentication required" });
+            _logger.LogWarning(
+                "MWF prefs PUT: authenticated but no user id in claims (claimTypes={ClaimTypes})",
+                string.Join(",", User.Claims.Select(c => c.Type)));
+            return Unauthorized(new { error = "Could not resolve Jellyfin user id" });
         }
 
         if (body is null)
         {
+            _logger.LogWarning("MWF prefs PUT for user {UserId}: empty/unparsed body", userId);
             return BadRequest(new { error = "prefs body required" });
         }
 
@@ -196,6 +208,10 @@ public class MwfController : ControllerBase
 
         var saved = _prefsStore.Get(userId.Value);
         saved.Stored = true;
+        _logger.LogInformation(
+            "MWF prefs PUT for user {UserId}: blasphemy={Blasphemy}, path under plugin data folder",
+            userId,
+            saved.Blasphemy);
         return Ok(saved);
     }
 
@@ -228,6 +244,8 @@ public class MwfController : ControllerBase
             var type = claim.Type ?? string.Empty;
             if (type.Equals(ClaimTypes.NameIdentifier, StringComparison.OrdinalIgnoreCase)
                 || type.Equals("Jellyfin-UserId", StringComparison.OrdinalIgnoreCase)
+                || type.Equals("UserId", StringComparison.OrdinalIgnoreCase)
+                || type.EndsWith("user_id", StringComparison.OrdinalIgnoreCase)
                 || type.EndsWith("/nameidentifier", StringComparison.OrdinalIgnoreCase)
                 || type.Equals("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", StringComparison.OrdinalIgnoreCase))
             {

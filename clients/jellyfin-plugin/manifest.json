@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.18.0",
+        "changelog": "Fix prefs save/load: ApiClient auth (no Invalid token), Newtonsoft camelCase, clearer logs.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-18/jellyfin-plugin-mediawordfilter_1.0.18.0.zip",
+        "checksum": "ab5c6b3e0f7c7236d63b218344d45cf7",
+        "timestamp": "2026-07-26T16:50:00Z"
+      },
+      {
         "version": "1.0.17.0",
         "changelog": "Save filter prefs per Jellyfin user on the server \u2014 syncs across devices; applies to all titles.",
         "targetAbi": "10.11.0.0",
