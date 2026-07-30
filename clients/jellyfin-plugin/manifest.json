@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.24.1",
+        "changelog": "Fix block overlays stacking: purge orphan overlay hosts, remove stale rects each tick, scope rect ids by scene; honor cover start_ms/end_ms.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-24/jellyfin-plugin-mediawordfilter_1.0.24.1.zip",
+        "checksum": "63f5b0b6b5333ede197bcce1b86d9ca8",
+        "timestamp": "2026-07-30T12:33:24Z"
+      },
+      {
         "version": "1.0.24.0",
         "changelog": "view_filter cover boxes honor per-box start_ms / end_ms (appear on draw time, disappear when ended); full-frame only when no drawn boxes.",
         "targetAbi": "10.11.0.0",

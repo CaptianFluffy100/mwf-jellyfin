@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.24.0";
+  var CLIENT_VERSION = "1.0.24.1";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -1810,6 +1810,16 @@
       document.body.appendChild(host);
       state.overlayHost = host;
     }
+    // Jellyfin SPA / video remount can leave stale overlay roots; keep only one.
+    try {
+      document.querySelectorAll(".mwf-block-overlay").forEach(function (node) {
+        if (node !== host) {
+          try {
+            node.remove();
+          } catch (_) {}
+        }
+      });
+    } catch (_) {}
     var rect = video.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) {
       hideBlockOverlay();
@@ -1828,6 +1838,16 @@
       state.overlayHost.style.display = "none";
       state.overlayHost.innerHTML = "";
     }
+    // Sweep any orphan hosts left after player remounts.
+    try {
+      document.querySelectorAll(".mwf-block-overlay").forEach(function (node) {
+        if (!state.overlayHost || node !== state.overlayHost) {
+          try {
+            node.remove();
+          } catch (_) {}
+        }
+      });
+    } catch (_) {}
   }
 
   function clearBlockOverlay() {
@@ -1837,6 +1857,13 @@
       } catch (_) {}
       state.overlayHost = null;
     }
+    try {
+      document.querySelectorAll(".mwf-block-overlay").forEach(function (node) {
+        try {
+          node.remove();
+        } catch (_) {}
+      });
+    } catch (_) {}
   }
 
   function renderBlockOverlay(video, blockScenes, tMs) {
@@ -1845,6 +1872,7 @@
       return;
     }
     if (!mediaIsPlayable(video) || !state.playbackSettled) {
+      hideBlockOverlay();
       return;
     }
     var host = ensureOverlayHost(video);
@@ -1865,7 +1893,14 @@
       }
       Object.keys(byId).forEach(function (tid) {
         var sample = sampleTrack(byId[tid], rel);
-        if (sample && sample.rec_center && sample.rec_size) samples.push(sample);
+        if (sample && sample.rec_center && sample.rec_size) {
+          // Scope DOM id by scene so overlapping scenes / remounts don't leak rects.
+          samples.push({
+            domId: String(scene.id || "scene") + ":" + String(sample.id || tid),
+            rec_center: sample.rec_center,
+            rec_size: sample.rec_size
+          });
+        }
       });
     }
 
@@ -1888,26 +1923,43 @@
 
     var existing = {};
     host.querySelectorAll(".mwf-block-rect").forEach(function (el) {
-      existing[el.dataset.blockId] = el;
+      var key = el.dataset.blockId || "";
+      // If duplicates already leaked for one id, drop extras now.
+      if (existing[key]) {
+        try {
+          el.remove();
+        } catch (_) {}
+        return;
+      }
+      existing[key] = el;
     });
+
     var keep = {};
     for (var s = 0; s < samples.length; s++) {
       var sample = samples[s];
-      keep[sample.id] = true;
-      var el = existing[sample.id];
+      var domId = sample.domId;
+      keep[domId] = true;
+      var el = existing[domId];
       if (!el) {
         el = document.createElement("div");
         el.className = "mwf-block-rect";
-        el.dataset.blockId = sample.id;
+        el.dataset.blockId = domId;
         host.appendChild(el);
+        existing[domId] = el;
       }
       el.style.left = sample.rec_center.x - sample.rec_size.w / 2 + "%";
       el.style.top = sample.rec_center.y - sample.rec_size.h / 2 + "%";
       el.style.width = sample.rec_size.w + "%";
       el.style.height = sample.rec_size.h + "%";
     }
-    Object.keys(existing).forEach(function (rid) {
-      if (!keep[rid]) existing[rid].remove();
+    // Remove every rect not in this frame's keep set (including orphans).
+    host.querySelectorAll(".mwf-block-rect").forEach(function (el) {
+      var key = el.dataset.blockId || "";
+      if (!keep[key]) {
+        try {
+          el.remove();
+        } catch (_) {}
+      }
     });
   }
 
