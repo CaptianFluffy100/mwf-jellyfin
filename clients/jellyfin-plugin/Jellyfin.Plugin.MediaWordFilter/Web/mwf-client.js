@@ -58,7 +58,7 @@
     }
   ];
 
-  var CLIENT_VERSION = "1.0.23.0";
+  var CLIENT_VERSION = "1.0.24.0";
   // Have enough buffered media before mute/skip/overlay touch the element.
   var MIN_READY = 3; // HAVE_FUTURE_DATA
   var SETTLE_MS = 500;
@@ -449,7 +449,7 @@
     var n = Number(doc.audio_shift_ms);
     if (!Number.isFinite(n)) n = Number(doc.audioShiftMs);
     if (!Number.isFinite(n)) return 0;
-    return Math.max(-10000, Math.min(10000, Math.round(n)));
+    return Math.max(-60000, Math.min(60000, Math.round(n)));
   }
 
   function rebuildFromCachedDoc() {
@@ -1512,29 +1512,62 @@
     return x * x * (3 - 2 * x);
   }
 
+  /**
+   * Sample one cover-box track at scene-relative time.
+   * Lifetime: [start_ms, end_ms) when set; start defaults to first keyframe time.
+   */
   function sampleTrack(keyframes, relMs) {
     if (!keyframes || !keyframes.length) return null;
     var sorted = keyframes.slice().sort(function (a, b) {
-      return a.time_ms - b.time_ms;
+      return Number(a.time_ms) - Number(b.time_ms);
     });
-    if (relMs <= sorted[0].time_ms) {
+    var startMs = null;
+    var endMs = null;
+    for (var ei = 0; ei < sorted.length; ei++) {
+      var sk = sorted[ei].start_ms;
+      if (sk != null && sk !== "" && isFinite(Number(sk))) {
+        var sv = Number(sk);
+        startMs = startMs == null ? sv : Math.min(startMs, sv);
+      }
+      var ek = sorted[ei].end_ms;
+      if (ek != null && ek !== "" && isFinite(Number(ek))) {
+        var ev = Number(ek);
+        endMs = endMs == null ? ev : Math.min(endMs, ev);
+      }
+    }
+    var first = sorted[0];
+    var firstT = Number(first.time_ms) || 0;
+    if (startMs == null) startMs = firstT;
+    if (relMs < startMs) return null;
+    if (endMs != null && relMs >= endMs) return null;
+
+    // From box start until first keyframe (and at first keyframe): hold first pose.
+    if (relMs <= firstT) {
       return {
-        id: sorted[0].id,
-        rec_center: sorted[0].rec_center,
-        rec_size: sorted[0].rec_size
+        id: first.id || "legacy",
+        rec_center: first.rec_center,
+        rec_size: first.rec_size
       };
     }
+
     var last = sorted[sorted.length - 1];
-    if (relMs >= last.time_ms) {
-      return { id: last.id, rec_center: last.rec_center, rec_size: last.rec_size };
+    var lastT = Number(last.time_ms) || 0;
+    if (relMs >= lastT) {
+      return {
+        id: last.id || "legacy",
+        rec_center: last.rec_center,
+        rec_size: last.rec_size
+      };
     }
     for (var i = 0; i < sorted.length - 1; i++) {
       var a = sorted[i];
       var b = sorted[i + 1];
-      if (relMs >= a.time_ms && relMs <= b.time_ms) {
-        var t = smoothstep((relMs - a.time_ms) / Math.max(1, b.time_ms - a.time_ms));
+      var aT = Number(a.time_ms) || 0;
+      var bT = Number(b.time_ms) || 0;
+      if (relMs >= aT && relMs <= bT) {
+        var t = smoothstep((relMs - aT) / Math.max(1, bT - aT));
         return {
-          id: a.id,
+          id: a.id || "legacy",
           rec_center: {
             x: lerp(a.rec_center.x, b.rec_center.x, t),
             y: lerp(a.rec_center.y, b.rec_center.y, t)
@@ -1818,20 +1851,39 @@
     if (!host) return;
 
     var samples = [];
+    var anyKeyframes = false;
     for (var i = 0; i < blockScenes.length; i++) {
       var scene = blockScenes[i];
       var rel = tMs - scene.start_ms;
       var byId = {};
       var kfs = scene.blocks || [];
+      if (kfs.length) anyKeyframes = true;
       for (var k = 0; k < kfs.length; k++) {
         var id = kfs[k].id || "legacy";
         if (!byId[id]) byId[id] = [];
         byId[id].push(kfs[k]);
       }
-      Object.keys(byId).forEach(function (id) {
-        var sample = sampleTrack(byId[id], rel);
-        if (sample) samples.push(sample);
+      Object.keys(byId).forEach(function (tid) {
+        var sample = sampleTrack(byId[tid], rel);
+        if (sample && sample.rec_center && sample.rec_size) samples.push(sample);
       });
+    }
+
+    // No drawn boxes → full-frame cover for the scene window.
+    // Keyframed boxes that all hit end_ms → clear (do not full-frame).
+    if (!samples.length) {
+      host.innerHTML = "";
+      if (!anyKeyframes) {
+        var full = document.createElement("div");
+        full.className = "mwf-block-rect";
+        full.dataset.blockId = "full";
+        full.style.left = "0%";
+        full.style.top = "0%";
+        full.style.width = "100%";
+        full.style.height = "100%";
+        host.appendChild(full);
+      }
+      return;
     }
 
     var existing = {};
@@ -1854,8 +1906,8 @@
       el.style.width = sample.rec_size.w + "%";
       el.style.height = sample.rec_size.h + "%";
     }
-    Object.keys(existing).forEach(function (id) {
-      if (!keep[id]) existing[id].remove();
+    Object.keys(existing).forEach(function (rid) {
+      if (!keep[rid]) existing[rid].remove();
     });
   }
 
@@ -1866,7 +1918,7 @@
       return;
     }
     // Never seek/overlay while the player is still buffering or settling.
-    if (!state.playbackSettled || !mediaIsPlayable(video) || video.paused) {
+    if (!state.playbackSettled || !mediaIsPlayable(video)) {
       hideBlockOverlay();
       return;
     }
@@ -1875,6 +1927,7 @@
       var jump = farthestSkipEnd(tMs, resolved.skip);
       if (
         jump &&
+        !video.paused &&
         state.lastSkipId !== jump.id + ":" + jump.end_ms &&
         !video.seeking
       ) {
@@ -1892,6 +1945,7 @@
       return;
     }
     state.lastSkipId = null;
+    // Keep cover boxes visible while paused so scrubbing matches the editor.
     renderBlockOverlay(video, resolved.blocks, tMs);
   }
 

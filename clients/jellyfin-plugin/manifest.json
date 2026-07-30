@@ -8,6 +8,14 @@
     "owner": "Media-Word-Filter",
     "versions": [
       {
+        "version": "1.0.24.0",
+        "changelog": "view_filter cover boxes honor per-box start_ms / end_ms (appear on draw time, disappear when ended); full-frame only when no drawn boxes.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/CaptianFluffy100/mwf-jellyfin/releases/download/alpha-24/jellyfin-plugin-mediawordfilter_1.0.24.0.zip",
+        "checksum": "ae0bf4286f21a7f0573d3a8634f7e591",
+        "timestamp": "2026-07-30T12:04:02Z"
+      },
+      {
         "version": "1.0.23.0",
         "changelog": "Audio shift moved to MWF per-title DB; plugin reads audio_shift_ms from mute API for all clients.",
         "targetAbi": "10.11.0.0",

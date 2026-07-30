@@ -5,9 +5,9 @@
   "overview": "Reads item audio_shift_ms from MWF mute API (set on MWF Edit filter shift page).",
   "owner": "Media-Word-Filter",
   "category": "General",
-  "version": "1.0.23.0",
-  "changelog": "Audio shift moved to MWF per-title DB; plugin reads audio_shift_ms from mute API for all clients.",
+  "version": "1.0.24.0",
+  "changelog": "view_filter cover boxes honor per-box start_ms / end_ms (appear on draw time, disappear when ended); full-frame only when no drawn boxes.",
   "targetAbi": "10.11.0.0",
   "framework": "net9.0",
-  "timestamp": "2026-07-26T20:15:00Z"
+  "timestamp": "2026-07-30T12:04:02Z"
 }
